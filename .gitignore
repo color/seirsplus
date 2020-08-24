@@ -1,4 +1,6 @@
 # ignore temporary swap files
 *.swp
 
+# ignore python classes
+*.pyc
 .DS_Store
