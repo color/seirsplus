@@ -74,6 +74,14 @@ def weekly_continuous_testing_simulation(model, time):
     """
     return run_rtw_testing_sim(model=model, T=time, symptomatic_selfiso_compliance_rate=0.3, test_logistics='continuous', continuous_days_between_tests=7)
 
+def one_third_per_week_continuous_testing_simulation(model, time):
+    """
+    Basic model with weekly testing on Mondays and
+    with some level of symptomatic self isolation
+    """
+    return run_rtw_testing_sim(model=model, T=time, symptomatic_selfiso_compliance_rate=0.3, test_logistics='continuous', continuous_days_between_tests=21)
+
+
 def monthly_continuous_testing_simulation(model, time):
     """
     Basic model with weekly testing on Mondays and
@@ -140,7 +148,7 @@ def repeat_runs(n_repeats, simulation_fxn, save_escalation_time = False):
 
 
 ### Graph params for N=1000
-def make_params():
+def get_params():
     num_cohorts = 10 # number of different groups
     number_teams_per_cohort = 5 # number of teams
     num_nodes_per_cohort = 100 # total number of people per group
@@ -215,3 +223,9 @@ def main():
 
     high_symptomatic = repeat_runs(repeats, high_symptomatic_baseline)
     high_symptomatic.to_csv('/Users/julianhomburger/Data/covid/seirsplus/200624/high_symptomatic_baseline200713.csv')
+
+    three_weeks = repeat_runs(repeats, one_third_per_week_continuous_testing_simulation)
+    three_weeks.to_csv('/Users/julianhomburger/Data/covid/seirsplus/three_weeks_high_init.csv')
+
+    weekly_high_init = repeat_runs(repeats, weekly_continuous_testing_simulation)
+    weekly_high_init.to_csv('/Users/julianhomburger/Data/covid/seirsplus/weekly_high_init.csv')

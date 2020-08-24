@@ -2,7 +2,9 @@
 ## Goal:
 
 #### Need to install python3 tkinter
+# sudo apt-get install python3-tk
 #### Need to add seirsplus to pythonpath
+# export PYTHONPATH=/color/seirsplus/seirsplus/:$PYTHONPATH
 
 import sys
 import networkx
@@ -58,7 +60,7 @@ def repeat_runs_webapp(n_repeats, simulation_fxn, save_escalation_time = False):
 ### Write out the lists of parameters to loop over
 
 r0_lists = [2.5, 2.0, 1.5, 1.0]
-population_sizes = [50, 100, 500, 1000]
+population_sizes = [50, 100, 500, 1000, 10000]
 
 testing_cadence, introduction_rate, tats = sys.argv[1].split(',')
 # introduction_rate = sys.argv[2] # parameterized in mean days to next introduction

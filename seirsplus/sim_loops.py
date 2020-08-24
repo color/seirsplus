@@ -317,11 +317,11 @@ def get_temporal_false_negative_rates(model):
     Convenience function for returning best false negative rates to save copy/paste
     """
     temporal_falseneg_rates = {
-                                model.E:        {0: 1.00, 1: 1.00, 2: 1.00, 3: 1.00},
+                                model.E:        {0: 1.10, 1: 1.10, 2: 1.10, 3: 1.10},
                                 model.I_pre:    {0: 0.24, 1: 0.24, 2: 0.24},
                                 model.I_sym:    {0: 0.24, 1: 0.18, 2: 0.17, 3: 0.18, 4: 0.20, 5: 0.23, 6: 0.26, 7: 0.30, 8: 0.34, 9: 0.38, 10: 0.43, 11: 0.48, 12: 0.52, 13: 0.57, 14: 0.61, 15: 0.65, 16: 0.69, 17: 0.76, 18: 0.79, 19: 0.82, 20: 0.85, 21: 0.88, 22: 0.90, 23: 0.92, 24: 0.93, 25: 0.95, 26: 0.96, 27: 0.97, 28: 0.97, 29: 0.98, 30: 0.98, 31: 0.99},
                                 model.I_asym:   {0: 0.24, 1: 0.18, 2: 0.17, 3: 0.18, 4: 0.20, 5: 0.23, 6: 0.26, 7: 0.30, 8: 0.34, 9: 0.38, 10: 0.43, 11: 0.48, 12: 0.52, 13: 0.57, 14: 0.61, 15: 0.65, 16: 0.69, 17: 0.76, 18: 0.79, 19: 0.82, 20: 0.85, 21: 0.88, 22: 0.90, 23: 0.92, 24: 0.93, 25: 0.95, 26: 0.96, 27: 0.97, 28: 0.97, 29: 0.98, 30: 0.98, 31: 0.99},
-                                model.Q_E:      {0: 1.00, 1: 1.00, 2: 1.00, 3: 1.00},
+                                model.Q_E:      {0: 1.10, 1: 1.10, 2: 1.10, 3: 1.10},
                                 model.Q_pre:    {0: 0.24, 1: 0.24, 2: 0.24},
                                 model.Q_sym:    {0: 0.24, 1: 0.18, 2: 0.17, 3: 0.18, 4: 0.20, 5: 0.23, 6: 0.26, 7: 0.30, 8: 0.34, 9: 0.38, 10: 0.43, 11: 0.48, 12: 0.52, 13: 0.57, 14: 0.61, 15: 0.65, 16: 0.69, 17: 0.76, 18: 0.79, 19: 0.82, 20: 0.85, 21: 0.88, 22: 0.90, 23: 0.92, 24: 0.93, 25: 0.95, 26: 0.96, 27: 0.97, 28: 0.97, 29: 0.98, 30: 0.98, 31: 0.99},
                                 model.Q_asym:   {0: 0.24, 1: 0.18, 2: 0.17, 3: 0.18, 4: 0.20, 5: 0.23, 6: 0.26, 7: 0.30, 8: 0.34, 9: 0.38, 10: 0.43, 11: 0.48, 12: 0.52, 13: 0.57, 14: 0.61, 15: 0.65, 16: 0.69, 17: 0.76, 18: 0.79, 19: 0.82, 20: 0.85, 21: 0.88, 22: 0.90, 23: 0.92, 24: 0.93, 25: 0.95, 26: 0.96, 27: 0.97, 28: 0.97, 29: 0.98, 30: 0.98, 31: 0.99},
@@ -362,7 +362,8 @@ def run_rtw_testing_sim(model, T,
                         teams=None, average_introductions_per_day=0,
                         print_interval=10, timeOfLastPrint=-1, verbose='t', sensitivity_offset = 0,
                         test_logistics='cadence', continuous_days_between_tests=0,
-                        escalate_on_positive=False, escalate_days_between_tests=0, full_time=False):
+                        escalate_on_positive=False, escalate_days_between_tests=0, full_time=False,
+                        initial_test_period = 0, initial_test_period_days = [0]):
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -486,10 +487,16 @@ def run_rtw_testing_sim(model, T,
                 # on cadence testing days
                 #----------------------------------------
                 if test_logistics == 'cadence':
+                    toTest = False
                     testing_strategy_selection = []
                     cadenceDayNumber = int(model.t % 28)
-                    if(cadenceDayNumber in testingDays):
+                    if (model.t < initial_test_period) and (int(model.t) in initial_test_period_days):
+                        print('Initial testing occuring...')
+                        toTest = True
 
+                    elif(cadenceDayNumber in testingDays):
+                        toTest = True
+                    if toTest:
                         testingPool = numpy.argwhere((testing_compliance==True)
                                                      & (nodePositiveStatuses==False)
                                                      & (nodeStates != model.R)
