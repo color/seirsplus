@@ -4,7 +4,7 @@ import numpy
 import random
 import time
 
-
+from collections import defaultdict
 
 def run_manual_random_testing_sim(model, T,
                                     testing_interval, tests_per_interval, test_falseneg_rate, intervention_start_pct_infected=0,
@@ -338,6 +338,8 @@ def set_continuous_testing_days(model, continuous_days_between_tests):
     Sets continuous testing days, return a list of integers of days for individuals to be
     tested on
     """
+    if continuous_days_between_tests == 0:
+        return([-1] * model.numNodes) # Nobody gets tested at this time
     # Make sure the days between tests makes sense
     if continuous_days_between_tests < 1:
         raise ValueError('Need to choose a number of days between individuals tests to use continuous testing mode')
@@ -649,6 +651,159 @@ def run_rtw_testing_sim(model, T,
     interventionInterval = (interventionStartTime, model.t)
 
     return interventionInterval, positive_found_on, escalation_type, total_tests
+
+def symptomatic_self_isolation(model, symptomatic_selfiso_compliance):
+    symptomaticNodes = numpy.argwhere((model.X.flatten()==model.I_sym)).flatten()
+    numSelfIsolated_symptoms = 0
+    for symptomaticNode in symptomaticNodes:
+        if(symptomatic_selfiso_compliance[symptomaticNode]):
+            if(model.X[symptomaticNode] == model.I_sym):
+                model.set_isolation(symptomaticNode, True)
+                numSelfIsolated_symptoms += 1
+    return numSelfIsolated_symptoms
+
+def continuous_test_intervention(model, continuous_days_between_tests, continuous_testing_days):
+    testing_date = int(model.t % continuous_days_between_tests)
+    testing_strategy_selection = numpy.argwhere(numpy.array(continuous_testing_days) == testing_date).flatten()
+    return(testing_strategy_selection)
+
+def run_ze_tests(model, selectedToTest, temporal_falseneg_rates, positive_isolation_compliance):
+    """
+    Performs testing and returns the new groups on nodes that tested positive
+    """
+    newIsolationGroup = []
+    for i, testNode in enumerate(selectedToTest):
+        model.set_tested(testNode, True)
+        # If the node to be tested is not infected, then the test is guaranteed negative,
+        # so don't bother going through with doing the test:
+        if(model.X[testNode] == model.S or model.X[testNode] == model.Q_S):
+            pass
+        elif(model.X[testNode] == model.E or model.X[testNode] == model.Q_E
+             or model.X[testNode] == model.I_pre or model.X[testNode] == model.Q_pre
+             or model.X[testNode] == model.I_sym or model.X[testNode] == model.Q_sym
+             or model.X[testNode] == model.I_asym or model.X[testNode] == model.Q_asym):
+
+            testNodeState       = model.X[testNode][0]
+            testNodeTimeInState = model.timer_state[testNode][0]
+            if(testNodeState in temporal_falseneg_rates.keys()):
+                falseneg_prob = temporal_falseneg_rates[testNodeState][ int(min(testNodeTimeInState, max(temporal_falseneg_rates[testNodeState].keys()))) ]
+            else:
+                falseneg_prob = 1.00
+            if(numpy.random.rand() < (1-falseneg_prob)):
+                # +++++++++++++++++++++++++++++++++++++++++++++
+                # The tested node has returned a positive test
+                # +++++++++++++++++++++++++++++++++++++++++++++
+                # Update the node's state to the appropriate detected case state:
+                model.set_positive(testNode, True)
+                # model.set_isolation(testNode, True)
+
+                # Add this positive node to the isolation group (if applicable):
+                if(positive_isolation_compliance[testNode]):
+                    newIsolationGroup.append(testNode)
+    return(newIsolationGroup)
+
+
+def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_seektest_compliance_rate=0.0, isolation_lag=1,
+                                initial_testing_rate = 0, symptomatic_selfiso_compliance_rate = 0.0, average_introductions_per_day=0,
+                                positive_isolation_compliance_rate = 1):
+
+    """
+    This function runs an adaptive testing approach for RTW programs.
+    """
+    temporal_falseneg_rates = get_temporal_false_negative_rates(model)
+
+    timeOfLastInterventionCheck = -1
+    timeOfLastIntroductionCheck = -1
+
+    testing_compliance              = (numpy.random.rand(model.numNodes) < testing_compliance_rate)
+    symptomatic_seektest_compliance = (numpy.random.rand(model.numNodes) < symptomatic_seektest_compliance_rate)
+    symptomatic_selfiso_compliance  = (numpy.random.rand(model.numNodes) < symptomatic_selfiso_compliance_rate)
+    positive_isolation_compliance   = (numpy.random.rand(model.numNodes) < positive_isolation_compliance_rate)
+
+    ## Set up independent days/groups for continuous testing
+    continuous_testing_days = set_continuous_testing_days(model, initial_testing_rate)
+    continuous_days_between_tests = initial_testing_rate
+    isolation_dict = defaultdict(list)
+
+    model.tmax  = T
+    running     = True
+    total_tests = 0
+    while running:
+        running = model.run_iteration_full_time() # these models are really meant to be run on the full time scale
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # Introduce exogenous exposures randomly at designated intervals:
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        if(int(model.t)!=int(timeOfLastIntroductionCheck)):
+            # Ensures this loop happens at most once per day
+            timeOfLastIntroductionCheck = model.t
+
+            numNewExposures=numpy.random.poisson(lam=average_introductions_per_day)
+
+            model.introduce_exposures(num_new_exposures=numNewExposures)
+
+            if(numNewExposures > 0):
+                print("[NEW EXPOSURE @ t = %.2f (%d exposed)]" % (model.t, numNewExposures))
+
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # Execute testing policy at designated intervals:
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+        if(int(model.t)!=int(timeOfLastInterventionCheck)):
+            # Ensures this loop happens at most once per day
+
+            timeOfLastInterventionCheck = model.t
+
+            currentNumInfected = model.total_num_infected()[model.tidx]
+            currentPctInfected = model.total_num_infected()[model.tidx]/model.numNodes
+
+            print("[INTERVENTIONS @ t = %.2f (%d (%.2f%%) infected)]" % (model.t, currentNumInfected, currentPctInfected*100))
+
+            #----------------------------------------
+            # Manually enforce that some percentage of symptomatic cases self-isolate without a test
+            #----------------------------------------
+            numSelfIsolated_symptoms = symptomatic_self_isolation(model, symptomatic_selfiso_compliance)
+            print("\t"+str(numSelfIsolated_symptoms)+" self-isolated due to symptoms")
+
+            #----------------------------------------
+            # Update the nodeStates list after self-isolation updates to model.X:
+            #----------------------------------------
+            nodeStates = model.X.flatten()
+
+            # Continuous testing intervention
+            continuous_test_nodes = continuous_test_intervention(model, continuous_days_between_tests, continuous_testing_days)
+
+            selectedToTest = continuous_test_nodes
+
+            total_tests += len(selectedToTest)
+
+            newIsolationGroup = run_ze_tests(model, selectedToTest, temporal_falseneg_rates, positive_isolation_compliance)
+            time_to_isolate = int(model.t) + isolation_lag
+            # Add the nodes to be traced to the tracing queue:
+            if len(newIsolationGroup) > 0:
+                print(newIsolationGroup)
+                isolation_dict[time_to_isolate].extend(newIsolationGroup)
+
+            numIsolated = 0
+            days_to_check = list(isolation_dict.keys())
+            print(isolation_dict)
+            for iso_check in days_to_check:
+                if iso_check <= int(model.t):
+                    isolationGroup = isolation_dict.pop(iso_check)
+                    if len(isolationGroup) > 0:
+                        print('Isolating people')
+                        for isolationNode in isolationGroup:
+                            print(isolationNode)
+                            model.set_isolation(isolationNode, True)
+                            numIsolated += 1
+
+            print("\t"+str(numIsolated)+" entered isolation")
+
+            #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    return total_tests
+
 
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
