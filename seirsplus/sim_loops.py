@@ -663,6 +663,8 @@ def symptomatic_self_isolation(model, symptomatic_selfiso_compliance):
     return numSelfIsolated_symptoms
 
 def continuous_test_intervention(model, continuous_days_between_tests, continuous_testing_days):
+    if (continuous_days_between_tests == 0): # If no testing, return empty list
+        return([])
     testing_date = int(model.t % continuous_days_between_tests)
     testing_strategy_selection = numpy.argwhere(numpy.array(continuous_testing_days) == testing_date).flatten()
     return(testing_strategy_selection)
@@ -704,7 +706,7 @@ def run_ze_tests(model, selectedToTest, temporal_falseneg_rates, positive_isolat
 
 
 def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_seektest_compliance_rate=0.0, isolation_lag=1,
-                                initial_testing_rate = 0, symptomatic_selfiso_compliance_rate = 0.0, average_introductions_per_day=0,
+                                initial_days_between_tests = 0, symptomatic_selfiso_compliance_rate = 0.0, average_introductions_per_day=0,
                                 positive_isolation_compliance_rate = 1):
 
     """
@@ -721,8 +723,8 @@ def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_
     positive_isolation_compliance   = (numpy.random.rand(model.numNodes) < positive_isolation_compliance_rate)
 
     ## Set up independent days/groups for continuous testing
-    continuous_testing_days = set_continuous_testing_days(model, initial_testing_rate)
-    continuous_days_between_tests = initial_testing_rate
+    continuous_testing_days = set_continuous_testing_days(model, initial_days_between_tests)
+    continuous_days_between_tests = initial_days_between_tests
     isolation_dict = defaultdict(list)
 
     model.tmax  = T
@@ -785,18 +787,15 @@ def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_
 
             numIsolated = 0
             days_to_check = list(isolation_dict.keys())
-            print(isolation_dict)
             for iso_check in days_to_check:
                 if iso_check <= int(model.t):
                     isolationGroup = isolation_dict.pop(iso_check)
                     if len(isolationGroup) > 0:
-                        print('Isolating people')
                         for isolationNode in isolationGroup:
-                            print(isolationNode)
                             model.set_isolation(isolationNode, True)
                             numIsolated += 1
 
-            print("\t"+str(numIsolated)+" entered isolation")
+            print("\t"+str(numIsolated)+" entered isolation from testing")
 
             #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
