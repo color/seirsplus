@@ -704,14 +704,71 @@ def run_ze_tests(model, selectedToTest, temporal_falseneg_rates, positive_isolat
                     newIsolationGroup.append(testNode)
     return(newIsolationGroup)
 
+class CadenceChange:
+    # This is just a framework for new classes
+    def __init__(self, new_cadence):
+        self.new_cadence = new_cadence
+
+    def check_if_condition_met(self, previous_results, total_n):
+        pass
+
+    def get_new_test_cadence(self):
+        return(self.new_cadence)
+
+class GreaterThanAbsolutePositivesCadence(CadenceChange):
+
+    def __init__(self, new_cadence, number_positives, previous_days):
+        # Should type check all of these on init
+        self.number_positives = number_positives
+        self.new_cadence = new_cadence
+        self.previous_days = previous_days
+
+    def check_if_condition_met(self, previous_results, total_n):
+        if self.previous_days > len(previous_results):
+            return False
+        if sum(previous_results[-self.previous_days:]) >= self.number_positives:
+            return True
+        else:
+            return False
+
+class LessThanAbsolutePositivesCadence(CadenceChange):
+
+    def __init__(self, new_cadence, number_positives, previous_days):
+        # Should type check all of these on init
+        self.number_positives = number_positives
+        self.new_cadence = new_cadence
+        self.previous_days = previous_days
+
+    def check_if_condition_met(self, previous_results, total_n):
+        if self.previous_days > len(previous_results):
+            return False
+        if sum(previous_results[-self.previous_days:]) <= self.number_positives:
+            return True
+        else:
+            return False
+
+
 
 def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_seektest_compliance_rate=0.0, isolation_lag=1,
                                 initial_days_between_tests = 0, symptomatic_selfiso_compliance_rate = 0.0, average_introductions_per_day=0,
-                                positive_isolation_compliance_rate = 1):
+                                positive_isolation_compliance_rate = 1, cadence_changes = [],
+                                max_day_for_introductions = 365):
 
     """
     This function runs an adaptive testing approach for RTW programs.
+
+    Cadence changes are implemented as classes and require two functions:
+    1. A rule for the change (check_if_condition_met)
+    2. A new cadence (get_new_test_cadence)
+
+    Pass a list of these instances to the function. In case of a conflict, the
+    one furthest down the list will be evaluated last and 'win'
     """
+
+    # For a cadence change, need to know:
+    # 1. threshold or rule for the change
+    # 2. new testing cadence
+
     temporal_falseneg_rates = get_temporal_false_negative_rates(model)
 
     timeOfLastInterventionCheck = -1
@@ -727,15 +784,20 @@ def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_
     continuous_days_between_tests = initial_days_between_tests
     isolation_dict = defaultdict(list)
 
+    positive_result_history = [] # stores number of positives identified on a specific day
+
     model.tmax  = T
     running     = True
     total_tests = 0
     while running:
-        running = model.run_iteration_full_time() # these models are really meant to be run on the full time scale
+        if int(model.t) < max_day_for_introductions:
+            running = model.run_iteration_full_time()
+        else:
+            running = model.run_iteration() # these models are really meant to be run on the full time scale
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Introduce exogenous exposures randomly at designated intervals:
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        if(int(model.t)!=int(timeOfLastIntroductionCheck)):
+        if(int(model.t)!=int(timeOfLastIntroductionCheck) and int(model.t) < max_day_for_introductions):
             # Ensures this loop happens at most once per day
             timeOfLastIntroductionCheck = model.t
 
@@ -751,6 +813,16 @@ def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
         if(int(model.t)!=int(timeOfLastInterventionCheck)):
+            # Check if cadence changes
+            for c in cadence_changes:
+                if c.check_if_condition_met(positive_result_history, model.numNodes):
+                    new_cadence = c.get_new_test_cadence()
+                    if new_cadence != continuous_days_between_tests:
+                        print("[Cadence change @ t = %.2f (%d (%.2f%%) infected)]" % (model.t, currentNumInfected, currentPctInfected*100))
+                        continuous_days_between_tests = new_cadence
+                        continuous_testing_days = set_continuous_testing_days(model, initial_days_between_tests)
+
+
             # Ensures this loop happens at most once per day
 
             timeOfLastInterventionCheck = model.t
@@ -758,13 +830,13 @@ def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_
             currentNumInfected = model.total_num_infected()[model.tidx]
             currentPctInfected = model.total_num_infected()[model.tidx]/model.numNodes
 
-            print("[INTERVENTIONS @ t = %.2f (%d (%.2f%%) infected)]" % (model.t, currentNumInfected, currentPctInfected*100))
+            # print("[INTERVENTIONS @ t = %.2f (%d (%.2f%%) infected)]" % (model.t, currentNumInfected, currentPctInfected*100))
 
             #----------------------------------------
             # Manually enforce that some percentage of symptomatic cases self-isolate without a test
             #----------------------------------------
             numSelfIsolated_symptoms = symptomatic_self_isolation(model, symptomatic_selfiso_compliance)
-            print("\t"+str(numSelfIsolated_symptoms)+" self-isolated due to symptoms")
+            # print("\t"+str(numSelfIsolated_symptoms)+" self-isolated due to symptoms")
 
             #----------------------------------------
             # Update the nodeStates list after self-isolation updates to model.X:
@@ -779,13 +851,22 @@ def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_
             total_tests += len(selectedToTest)
 
             newIsolationGroup = run_ze_tests(model, selectedToTest, temporal_falseneg_rates, positive_isolation_compliance)
+
+            # We need to build in the ability to isolate positive tests, but
+            # accounting for test turn-around time
+
+            # Here, we are storing the list of individuals to be isolated in a dictionary
+            # where the key is the date of the model that they should be isolated on
+            # then, we just check to see which date/keys are equal to or less than the current time,
+            # isolate the individuals in that list, and remove that element from the dictionary
+            # Account for test turn around time
             time_to_isolate = int(model.t) + isolation_lag
-            # Add the nodes to be traced to the tracing queue:
+            # If any positives are going to be ID'd, add to the isolation queue
             if len(newIsolationGroup) > 0:
-                print(newIsolationGroup)
                 isolation_dict[time_to_isolate].extend(newIsolationGroup)
 
             numIsolated = 0
+            # dictionary is going to change during iteration so need to copy key list
             days_to_check = list(isolation_dict.keys())
             for iso_check in days_to_check:
                 if iso_check <= int(model.t):
@@ -794,12 +875,13 @@ def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_
                         for isolationNode in isolationGroup:
                             model.set_isolation(isolationNode, True)
                             numIsolated += 1
-
-            print("\t"+str(numIsolated)+" entered isolation from testing")
+            positive_result_history.append(numIsolated)
+            # print("\t"+str(numIsolated)+" entered isolation from testing")
 
             #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    print("[Finished @ t = %.2f (%d (%.2f%%) infected)]" % (model.t, currentNumInfected, currentPctInfected*100))
 
     return total_tests
 

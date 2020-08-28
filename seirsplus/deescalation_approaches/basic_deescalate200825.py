@@ -45,17 +45,28 @@ def repeat_runs_deescalate(n_repeats, simulation_fxn, save_escalation_time = Fal
         output_frames.append(thisout)
     return(pd.concat(output_frames))
 
-def baseline_simulation_de(model, time):
+def baseline_simulation_monthly_intro(model, time):
     """
     A simulation with no interventions at all, but some syptomatic self isolation
     """
-    return run_rtw_adaptive_testing(model=model, T=time, symptomatic_selfiso_compliance_rate=0.3)
+    return run_rtw_adaptive_testing(model=model, T=time, symptomatic_selfiso_compliance_rate=0.3, average_introductions_per_day=1/30)
 
-def weekly_simulation_de(model, time):
+def weekly_simulation_monthly_intro(model, time):
     """
     A simulation with no interventions at all, but some syptomatic self isolation
     """
-    return run_rtw_adaptive_testing(model=model, T=time, symptomatic_selfiso_compliance_rate=0.3, initial_days_between_tests=7)
+    return run_rtw_adaptive_testing(model=model, T=time, symptomatic_selfiso_compliance_rate=0.3, initial_days_between_tests=7, average_introductions_per_day=1/30)
+
+def weekly_simulation_deescalate_monthly_intro(model, time):
+    """
+    A simulation with no interventions at all, but some syptomatic self isolation
+    """
+    # Escalate if more than 5 positives in last 7 days
+    cadence_changes = [GreaterThanAbsolutePositivesCadence(7,2,7), LessThanAbsolutePositivesCadence(14,0,7)]
+    return run_rtw_adaptive_testing(model=model, T=time, symptomatic_selfiso_compliance_rate=0.3,
+                                    initial_days_between_tests=7, average_introductions_per_day=1/30,
+                                    cadence_changes = cadence_changes)
+
 
 
 def set_params_deescalate():
@@ -74,10 +85,14 @@ def set_params_deescalate():
     R0_COEFFVAR_HIGH = 2.2
     R0_COEFFVAR_LOW = 0.15
     P_GLOBALINTXN = 0.2
-    MAX_TIME = 200
+    MAX_INTRO_TIME = 365
+    MAX_TIME = 547
 
-repeats = 10
+repeats = 100
 def main():
-    set_params_deescalate()
-    baseline = repeat_runs_deescalate(repeats, baseline_simulation_de)
-    weekly = repeat_runs_deescalate(repeats, baseline_simulation_de)
+    baseline = repeat_runs_deescalate(repeats, baseline_simulation_monthly_intro)
+    baseline.to_csv('/Users/julianhomburger/Data/covid/seirsplus/200828/adaptive/baseline.csv')
+    weekly = repeat_runs_deescalate(repeats, weekly_simulation_deescalate_monthly_intro)
+    weekly.to_csv('/Users/julianhomburger/Data/covid/seirsplus/200828/adaptive/weekly_testing.csv')
+    weekly_de = repeat_runs_deescalate(repeats, weekly_simulation_deescalate_monthly_intro)
+    weekly_de.to_csv('/Users/julianhomburger/Data/covid/seirsplus/200828/adaptive/weekly_adaptive_testing.csv')
