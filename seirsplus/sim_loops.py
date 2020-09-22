@@ -349,8 +349,8 @@ def set_continuous_testing_days(model, continuous_days_between_tests):
     # Assign each individual to a group
     individuals_per_group = int(model.numNodes/continuous_days_between_tests)
     remainder = int(model.numNodes % continuous_days_between_tests)
-    groups = list(numpy.arange(1, continuous_days_between_tests+1)) * individuals_per_group
-    remainder_assignment = list(numpy.arange(1, continuous_days_between_tests+1))[0:remainder]
+    groups = list(numpy.arange(0, continuous_days_between_tests)) * individuals_per_group
+    remainder_assignment = list(numpy.arange(0, continuous_days_between_tests))[0:remainder]
     testing_days = groups + remainder_assignment
     random.shuffle(testing_days)
     return(testing_days)
@@ -365,7 +365,7 @@ def run_rtw_testing_sim(model, T,
                         print_interval=10, timeOfLastPrint=-1, verbose='t', sensitivity_offset = 0,
                         test_logistics='cadence', continuous_days_between_tests=0,
                         escalate_on_positive=False, escalate_days_between_tests=0, full_time=False,
-                        initial_test_period = 0, initial_test_period_days = [0]):
+                        initial_test_period = 0, initial_test_period_days = [0], max_dt=None, backlog_skipped_intervals = False):
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -424,6 +424,7 @@ def run_rtw_testing_sim(model, T,
             running = model.run_iteration_full_time()
         else:
             running = model.run_iteration()
+            # 0, 0.13, 0.57, 1.5, 3.3, 5.6, 5.7,
 
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Introduce exogenous exposures randomly at designated intervals:
@@ -662,11 +663,15 @@ def symptomatic_self_isolation(model, symptomatic_selfiso_compliance):
                 numSelfIsolated_symptoms += 1
     return numSelfIsolated_symptoms
 
-def continuous_test_intervention(model, continuous_days_between_tests, continuous_testing_days):
+def continuous_test_intervention(timepoints, continuous_days_between_tests, continuous_testing_days):
     if (continuous_days_between_tests == 0): # If no testing, return empty list
         return([])
-    testing_date = int(model.t % continuous_days_between_tests)
-    testing_strategy_selection = numpy.argwhere(numpy.array(continuous_testing_days) == testing_date).flatten()
+    # print(f'model time: {model.t}, days_between: {continuous_days_between_tests}')
+    # print(testing_date)
+    testing_strategy_selection = []
+    for k in timepoints:
+        testing_date = int(k % continuous_days_between_tests)
+        testing_strategy_selection.extend(numpy.argwhere(numpy.array(continuous_testing_days) == testing_date).flatten())
     return(testing_strategy_selection)
 
 def run_ze_tests(model, selectedToTest, temporal_falseneg_rates, positive_isolation_compliance):
@@ -752,7 +757,7 @@ class LessThanAbsolutePositivesCadence(CadenceChange):
 def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_seektest_compliance_rate=0.0, isolation_lag=1,
                                 initial_days_between_tests = 0, symptomatic_selfiso_compliance_rate = 0.0, average_introductions_per_day=0,
                                 positive_isolation_compliance_rate = 1, cadence_changes = [],
-                                max_day_for_introductions = 365):
+                                max_day_for_introductions = 365, max_dt=None, backlog_skipped_intervals = False):
 
     """
     This function runs an adaptive testing approach for RTW programs.
@@ -785,15 +790,18 @@ def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_
     isolation_dict = defaultdict(list)
 
     positive_result_history = [] # stores number of positives identified on a specific day
+    cadence_change_days = []
+    new_intros = []
 
     model.tmax  = T
     running     = True
     total_tests = 0
+    total_intros = 0
     while running:
         if int(model.t) < max_day_for_introductions:
-            running = model.run_iteration_full_time()
+            running = model.run_iteration_full_time(max_dt=max_dt)
         else:
-            running = model.run_iteration() # these models are really meant to be run on the full time scale
+            running = model.run_iteration(max_dt=max_dt) # these models are really meant to be run on the full time scale
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Introduce exogenous exposures randomly at designated intervals:
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -804,8 +812,9 @@ def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_
             numNewExposures=numpy.random.poisson(lam=average_introductions_per_day)
 
             model.introduce_exposures(num_new_exposures=numNewExposures)
-
             if(numNewExposures > 0):
+                new_intros.append(int(model.t))
+                total_intros += numNewExposures
                 print("[NEW EXPOSURE @ t = %.2f (%d exposed)]" % (model.t, numNewExposures))
 
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -820,12 +829,12 @@ def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_
                     if new_cadence != continuous_days_between_tests:
                         print("[Cadence change @ t = %.2f (%d (%.2f%%) infected)]" % (model.t, currentNumInfected, currentPctInfected*100))
                         continuous_days_between_tests = new_cadence
-                        continuous_testing_days = set_continuous_testing_days(model, initial_days_between_tests)
+                        continuous_testing_days = set_continuous_testing_days(model, continuous_days_between_tests)
+                        cadence_change_days.append(model.t)
 
 
             # Ensures this loop happens at most once per day
 
-            timeOfLastInterventionCheck = model.t
 
             currentNumInfected = model.total_num_infected()[model.tidx]
             currentPctInfected = model.total_num_infected()[model.tidx]/model.numNodes
@@ -844,12 +853,20 @@ def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_
             nodeStates = model.X.flatten()
 
             # Continuous testing intervention
-            continuous_test_nodes = continuous_test_intervention(model, continuous_days_between_tests, continuous_testing_days)
+            daynumbers = [int(model.t)]
+            if (backlog_skipped_intervals):
+                # print(f'time of last int check {timeOfLastInterventionCheck}')
+                # print(f'model time {model.t}')
+                # print([int(i) for i in numpy.arange(start=timeOfLastInterventionCheck, stop=int(model.t), step=1.0)[1:]])
+                daynumbers = [int(i) for i in numpy.arange(start=timeOfLastInterventionCheck, stop=int(model.t), step=1.0)[1:]] + daynumbers
+            print(daynumbers)
+            continuous_test_nodes = continuous_test_intervention(daynumbers, continuous_days_between_tests, continuous_testing_days)
 
             selectedToTest = continuous_test_nodes
-
-            total_tests += len(selectedToTest)
-
+            # print(selectedToTest)
+            num_tested_today = len(selectedToTest)
+            total_tests += num_tested_today
+            print(f'Total Tests: {total_tests}, Tested today: {num_tested_today}, time: {model.t}')
             newIsolationGroup = run_ze_tests(model, selectedToTest, temporal_falseneg_rates, positive_isolation_compliance)
 
             # We need to build in the ability to isolate positive tests, but
@@ -877,13 +894,14 @@ def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_
                             numIsolated += 1
             positive_result_history.append(numIsolated)
             # print("\t"+str(numIsolated)+" entered isolation from testing")
+            timeOfLastInterventionCheck = model.t
 
             #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     print("[Finished @ t = %.2f (%d (%.2f%%) infected)]" % (model.t, currentNumInfected, currentPctInfected*100))
 
-    return total_tests
+    return total_tests, total_intros, cadence_change_days, new_intros
 
 
 
