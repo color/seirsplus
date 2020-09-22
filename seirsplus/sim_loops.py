@@ -4,7 +4,7 @@ import numpy
 import random
 import time
 
-
+from collections import defaultdict
 
 def run_manual_random_testing_sim(model, T,
                                     testing_interval, tests_per_interval, test_falseneg_rate, intervention_start_pct_infected=0,
@@ -338,6 +338,8 @@ def set_continuous_testing_days(model, continuous_days_between_tests):
     Sets continuous testing days, return a list of integers of days for individuals to be
     tested on
     """
+    if continuous_days_between_tests == 0:
+        return([-1] * model.numNodes) # Nobody gets tested at this time
     # Make sure the days between tests makes sense
     if continuous_days_between_tests < 1:
         raise ValueError('Need to choose a number of days between individuals tests to use continuous testing mode')
@@ -347,8 +349,8 @@ def set_continuous_testing_days(model, continuous_days_between_tests):
     # Assign each individual to a group
     individuals_per_group = int(model.numNodes/continuous_days_between_tests)
     remainder = int(model.numNodes % continuous_days_between_tests)
-    groups = list(numpy.arange(1, continuous_days_between_tests+1)) * individuals_per_group
-    remainder_assignment = list(numpy.arange(1, continuous_days_between_tests+1))[0:remainder]
+    groups = list(numpy.arange(0, continuous_days_between_tests)) * individuals_per_group
+    remainder_assignment = list(numpy.arange(0, continuous_days_between_tests))[0:remainder]
     testing_days = groups + remainder_assignment
     random.shuffle(testing_days)
     return(testing_days)
@@ -363,7 +365,7 @@ def run_rtw_testing_sim(model, T,
                         print_interval=10, timeOfLastPrint=-1, verbose='t', sensitivity_offset = 0,
                         test_logistics='cadence', continuous_days_between_tests=0,
                         escalate_on_positive=False, escalate_days_between_tests=0, full_time=False,
-                        initial_test_period = 0, initial_test_period_days = [0]):
+                        initial_test_period = 0, initial_test_period_days = [0], max_dt=None, backlog_skipped_intervals = False):
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -422,6 +424,7 @@ def run_rtw_testing_sim(model, T,
             running = model.run_iteration_full_time()
         else:
             running = model.run_iteration()
+            # 0, 0.13, 0.57, 1.5, 3.3, 5.6, 5.7,
 
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Introduce exogenous exposures randomly at designated intervals:
@@ -649,6 +652,257 @@ def run_rtw_testing_sim(model, T,
     interventionInterval = (interventionStartTime, model.t)
 
     return interventionInterval, positive_found_on, escalation_type, total_tests
+
+def symptomatic_self_isolation(model, symptomatic_selfiso_compliance):
+    symptomaticNodes = numpy.argwhere((model.X.flatten()==model.I_sym)).flatten()
+    numSelfIsolated_symptoms = 0
+    for symptomaticNode in symptomaticNodes:
+        if(symptomatic_selfiso_compliance[symptomaticNode]):
+            if(model.X[symptomaticNode] == model.I_sym):
+                model.set_isolation(symptomaticNode, True)
+                numSelfIsolated_symptoms += 1
+    return numSelfIsolated_symptoms
+
+def continuous_test_intervention(timepoints, continuous_days_between_tests, continuous_testing_days):
+    if (continuous_days_between_tests == 0): # If no testing, return empty list
+        return([])
+    # print(f'model time: {model.t}, days_between: {continuous_days_between_tests}')
+    # print(testing_date)
+    testing_strategy_selection = []
+    for k in timepoints:
+        testing_date = int(k % continuous_days_between_tests)
+        testing_strategy_selection.extend(numpy.argwhere(numpy.array(continuous_testing_days) == testing_date).flatten())
+    return(testing_strategy_selection)
+
+def run_ze_tests(model, selectedToTest, temporal_falseneg_rates, positive_isolation_compliance):
+    """
+    Performs testing and returns the new groups on nodes that tested positive
+    """
+    newIsolationGroup = []
+    for i, testNode in enumerate(selectedToTest):
+        model.set_tested(testNode, True)
+        # If the node to be tested is not infected, then the test is guaranteed negative,
+        # so don't bother going through with doing the test:
+        if(model.X[testNode] == model.S or model.X[testNode] == model.Q_S):
+            pass
+        elif(model.X[testNode] == model.E or model.X[testNode] == model.Q_E
+             or model.X[testNode] == model.I_pre or model.X[testNode] == model.Q_pre
+             or model.X[testNode] == model.I_sym or model.X[testNode] == model.Q_sym
+             or model.X[testNode] == model.I_asym or model.X[testNode] == model.Q_asym):
+
+            testNodeState       = model.X[testNode][0]
+            testNodeTimeInState = model.timer_state[testNode][0]
+            if(testNodeState in temporal_falseneg_rates.keys()):
+                falseneg_prob = temporal_falseneg_rates[testNodeState][ int(min(testNodeTimeInState, max(temporal_falseneg_rates[testNodeState].keys()))) ]
+            else:
+                falseneg_prob = 1.00
+            if(numpy.random.rand() < (1-falseneg_prob)):
+                # +++++++++++++++++++++++++++++++++++++++++++++
+                # The tested node has returned a positive test
+                # +++++++++++++++++++++++++++++++++++++++++++++
+                # Update the node's state to the appropriate detected case state:
+                model.set_positive(testNode, True)
+                # model.set_isolation(testNode, True)
+
+                # Add this positive node to the isolation group (if applicable):
+                if(positive_isolation_compliance[testNode]):
+                    newIsolationGroup.append(testNode)
+    return(newIsolationGroup)
+
+class CadenceChange:
+    # This is just a framework for new classes
+    def __init__(self, new_cadence):
+        self.new_cadence = new_cadence
+
+    def check_if_condition_met(self, previous_results, total_n):
+        pass
+
+    def get_new_test_cadence(self):
+        return(self.new_cadence)
+
+class GreaterThanAbsolutePositivesCadence(CadenceChange):
+
+    def __init__(self, new_cadence, number_positives, previous_days):
+        # Should type check all of these on init
+        self.number_positives = number_positives
+        self.new_cadence = new_cadence
+        self.previous_days = previous_days
+
+    def check_if_condition_met(self, previous_results, total_n):
+        if self.previous_days > len(previous_results):
+            return False
+        if sum(previous_results[-self.previous_days:]) >= self.number_positives:
+            return True
+        else:
+            return False
+
+class LessThanAbsolutePositivesCadence(CadenceChange):
+
+    def __init__(self, new_cadence, number_positives, previous_days):
+        # Should type check all of these on init
+        self.number_positives = number_positives
+        self.new_cadence = new_cadence
+        self.previous_days = previous_days
+
+    def check_if_condition_met(self, previous_results, total_n):
+        if self.previous_days > len(previous_results):
+            return False
+        if sum(previous_results[-self.previous_days:]) <= self.number_positives:
+            return True
+        else:
+            return False
+
+
+
+def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_seektest_compliance_rate=0.0, isolation_lag=1,
+                                initial_days_between_tests = 0, symptomatic_selfiso_compliance_rate = 0.0, average_introductions_per_day=0,
+                                positive_isolation_compliance_rate = 1, cadence_changes = [],
+                                max_day_for_introductions = 365, max_dt=None, backlog_skipped_intervals = False):
+
+    """
+    This function runs an adaptive testing approach for RTW programs.
+
+    Cadence changes are implemented as classes and require two functions:
+    1. A rule for the change (check_if_condition_met)
+    2. A new cadence (get_new_test_cadence)
+
+    Pass a list of these instances to the function. In case of a conflict, the
+    one furthest down the list will be evaluated last and 'win'
+    """
+
+    # For a cadence change, need to know:
+    # 1. threshold or rule for the change
+    # 2. new testing cadence
+
+    temporal_falseneg_rates = get_temporal_false_negative_rates(model)
+
+    timeOfLastInterventionCheck = -1
+    timeOfLastIntroductionCheck = -1
+
+    testing_compliance              = (numpy.random.rand(model.numNodes) < testing_compliance_rate)
+    symptomatic_seektest_compliance = (numpy.random.rand(model.numNodes) < symptomatic_seektest_compliance_rate)
+    symptomatic_selfiso_compliance  = (numpy.random.rand(model.numNodes) < symptomatic_selfiso_compliance_rate)
+    positive_isolation_compliance   = (numpy.random.rand(model.numNodes) < positive_isolation_compliance_rate)
+
+    ## Set up independent days/groups for continuous testing
+    continuous_testing_days = set_continuous_testing_days(model, initial_days_between_tests)
+    continuous_days_between_tests = initial_days_between_tests
+    isolation_dict = defaultdict(list)
+
+    positive_result_history = [] # stores number of positives identified on a specific day
+    cadence_change_days = []
+    new_intros = []
+
+    model.tmax  = T
+    running     = True
+    total_tests = 0
+    total_intros = 0
+    while running:
+        if int(model.t) < max_day_for_introductions:
+            running = model.run_iteration_full_time(max_dt=max_dt)
+        else:
+            running = model.run_iteration(max_dt=max_dt) # these models are really meant to be run on the full time scale
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # Introduce exogenous exposures randomly at designated intervals:
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        if(int(model.t)!=int(timeOfLastIntroductionCheck) and int(model.t) < max_day_for_introductions):
+            # Ensures this loop happens at most once per day
+            timeOfLastIntroductionCheck = model.t
+
+            numNewExposures=numpy.random.poisson(lam=average_introductions_per_day)
+
+            model.introduce_exposures(num_new_exposures=numNewExposures)
+            if(numNewExposures > 0):
+                new_intros.append(int(model.t))
+                total_intros += numNewExposures
+                print("[NEW EXPOSURE @ t = %.2f (%d exposed)]" % (model.t, numNewExposures))
+
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # Execute testing policy at designated intervals:
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+        if(int(model.t)!=int(timeOfLastInterventionCheck)):
+            # Check if cadence changes
+            for c in cadence_changes:
+                if c.check_if_condition_met(positive_result_history, model.numNodes):
+                    new_cadence = c.get_new_test_cadence()
+                    if new_cadence != continuous_days_between_tests:
+                        print("[Cadence change @ t = %.2f (%d (%.2f%%) infected)]" % (model.t, currentNumInfected, currentPctInfected*100))
+                        continuous_days_between_tests = new_cadence
+                        continuous_testing_days = set_continuous_testing_days(model, continuous_days_between_tests)
+                        cadence_change_days.append(model.t)
+
+
+            # Ensures this loop happens at most once per day
+
+
+            currentNumInfected = model.total_num_infected()[model.tidx]
+            currentPctInfected = model.total_num_infected()[model.tidx]/model.numNodes
+
+            # print("[INTERVENTIONS @ t = %.2f (%d (%.2f%%) infected)]" % (model.t, currentNumInfected, currentPctInfected*100))
+
+            #----------------------------------------
+            # Manually enforce that some percentage of symptomatic cases self-isolate without a test
+            #----------------------------------------
+            numSelfIsolated_symptoms = symptomatic_self_isolation(model, symptomatic_selfiso_compliance)
+            # print("\t"+str(numSelfIsolated_symptoms)+" self-isolated due to symptoms")
+
+            #----------------------------------------
+            # Update the nodeStates list after self-isolation updates to model.X:
+            #----------------------------------------
+            nodeStates = model.X.flatten()
+
+            # Continuous testing intervention
+            daynumbers = [int(model.t)]
+            if (backlog_skipped_intervals):
+                # print(f'time of last int check {timeOfLastInterventionCheck}')
+                # print(f'model time {model.t}')
+                # print([int(i) for i in numpy.arange(start=timeOfLastInterventionCheck, stop=int(model.t), step=1.0)[1:]])
+                daynumbers = [int(i) for i in numpy.arange(start=timeOfLastInterventionCheck, stop=int(model.t), step=1.0)[1:]] + daynumbers
+            print(daynumbers)
+            continuous_test_nodes = continuous_test_intervention(daynumbers, continuous_days_between_tests, continuous_testing_days)
+
+            selectedToTest = continuous_test_nodes
+            # print(selectedToTest)
+            num_tested_today = len(selectedToTest)
+            total_tests += num_tested_today
+            print(f'Total Tests: {total_tests}, Tested today: {num_tested_today}, time: {model.t}')
+            newIsolationGroup = run_ze_tests(model, selectedToTest, temporal_falseneg_rates, positive_isolation_compliance)
+
+            # We need to build in the ability to isolate positive tests, but
+            # accounting for test turn-around time
+
+            # Here, we are storing the list of individuals to be isolated in a dictionary
+            # where the key is the date of the model that they should be isolated on
+            # then, we just check to see which date/keys are equal to or less than the current time,
+            # isolate the individuals in that list, and remove that element from the dictionary
+            # Account for test turn around time
+            time_to_isolate = int(model.t) + isolation_lag
+            # If any positives are going to be ID'd, add to the isolation queue
+            if len(newIsolationGroup) > 0:
+                isolation_dict[time_to_isolate].extend(newIsolationGroup)
+
+            numIsolated = 0
+            # dictionary is going to change during iteration so need to copy key list
+            days_to_check = list(isolation_dict.keys())
+            for iso_check in days_to_check:
+                if iso_check <= int(model.t):
+                    isolationGroup = isolation_dict.pop(iso_check)
+                    if len(isolationGroup) > 0:
+                        for isolationNode in isolationGroup:
+                            model.set_isolation(isolationNode, True)
+                            numIsolated += 1
+            positive_result_history.append(numIsolated)
+            # print("\t"+str(numIsolated)+" entered isolation from testing")
+            timeOfLastInterventionCheck = model.t
+
+            #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    print("[Finished @ t = %.2f (%d (%.2f%%) infected)]" % (model.t, currentNumInfected, currentPctInfected*100))
+
+    return total_tests, total_intros, cadence_change_days, new_intros
+
 
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

@@ -926,8 +926,9 @@ class ExtSEIRSNetworkModel():
 #^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 #^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-    def run_iteration(self):
-        self._run_iter()
+    def run_iteration(self, max_dt = None):
+
+        self._run_iter(max_dt=max_dt)
         if(self.t >= self.tmax or (self.total_num_infected(self.tidx) < 1 and self.total_num_isolated(self.tidx) < 1)):
             self.finalize_data_series()
             return False
@@ -935,14 +936,16 @@ class ExtSEIRSNetworkModel():
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         return True
 
-    def run_iteration_full_time(self):
-        self._run_iter()
+    def run_iteration_full_time(self, max_dt=None):
+        self._run_iter(max_dt=max_dt)
         if(self.t >= self.tmax):
             self.finalize_data_series()
             return False
         return True
 
-    def _run_iter(self):
+    def _run_iter(self, max_dt=None):
+
+        max_dt = self.tmax if max_dt is None else max_dt
         if(self.tidx >= len(self.tseries)-1):
             # Room has run out in the timeseries storage arrays; double the size of these arrays:
             self.increase_data_series_length()
@@ -973,8 +976,19 @@ class ExtSEIRSNetworkModel():
             # Compute the time until the next event takes place
             #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             tau = (1/alpha)*numpy.log(float(1/r1))
-            self.t += tau
-            self.timer_state += tau
+
+            if(tau > max_dt):
+                # If the time to next event exceeds the max allowed interval,
+                # advance the system time by the max allowed interval,
+                # but do not execute any events (recalculate Gillespie interval/event next iteration)
+                print("WHOA NELLIE")
+                print(tau)
+                self.t += max_dt
+                self.timer_state += max_dt
+                return True
+            else:
+                self.t += tau
+                self.timer_state += tau
 
             #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             # Compute which event takes place
@@ -1019,7 +1033,7 @@ class ExtSEIRSNetworkModel():
 
         else:
 
-            tau = 0.01
+            tau = 0.05
             self.t += tau
             self.timer_state += tau
 
@@ -1090,7 +1104,7 @@ class ExtSEIRSNetworkModel():
 #^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 #^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-    def run(self, T, checkpoints=None, print_interval=10, verbose='t'):
+    def run(self, T, checkpoints=None, max_dt=None, print_interval=10, verbose='t'):
         if(T>0):
             self.tmax += T
         else:
@@ -1117,7 +1131,7 @@ class ExtSEIRSNetworkModel():
         running     = True
         while running:
 
-            running = self.run_iteration()
+            running = self.run_iteration(max_dt=max_dt)
 
             #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             # Handle checkpoints if applicable:
