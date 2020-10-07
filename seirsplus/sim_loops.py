@@ -798,10 +798,7 @@ def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_
     total_tests = 0
     total_intros = 0
     while running:
-        if int(model.t) < max_day_for_introductions:
-            running = model.run_iteration_full_time(max_dt=max_dt)
-        else:
-            running = model.run_iteration(max_dt=max_dt) # these models are really meant to be run on the full time scale
+        running = model.run_iteration_full_time(max_dt=max_dt)
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Introduce exogenous exposures randomly at designated intervals:
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
