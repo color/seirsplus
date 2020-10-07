@@ -55,13 +55,13 @@ def baseline_simulation_monthly_intro(model, time):
     """
     A simulation with no interventions at all, but some syptomatic self isolation
     """
-    return run_rtw_adaptive_testing(model=model, T=time, symptomatic_selfiso_compliance_rate=0.3, average_introductions_per_day=1/30)
+    return run_rtw_adaptive_testing(model=model, T=time, symptomatic_selfiso_compliance_rate=0.3, average_introductions_per_day=1/30, max_dt=0.99, max_day_for_introductions=MAX_INTRO_TIME)
 
 def weekly_simulation_monthly_intro(model, time):
     """
     A simulation with no interventions at all, but some syptomatic self isolation
     """
-    return run_rtw_adaptive_testing(model=model, T=time, symptomatic_selfiso_compliance_rate=0.3, initial_days_between_tests=7, average_introductions_per_day=1/30)
+    return run_rtw_adaptive_testing(model=model, T=time, symptomatic_selfiso_compliance_rate=0.3, initial_days_between_tests=7, average_introductions_per_day=1/30, max_dt=0.99, max_day_for_introductions=MAX_INTRO_TIME)
 
 def weekly_simulation_deescalate_monthly_intro(model, time):
     """
@@ -71,7 +71,7 @@ def weekly_simulation_deescalate_monthly_intro(model, time):
     cadence_changes = [GreaterThanAbsolutePositivesCadence(7,2,7), LessThanAbsolutePositivesCadence(14,0,7)]
     return run_rtw_adaptive_testing(model=model, T=time, symptomatic_selfiso_compliance_rate=0.3,
                                     initial_days_between_tests=7, average_introductions_per_day=1/30,
-                                    cadence_changes = cadence_changes)
+                                    cadence_changes = cadence_changes, max_dt=0.99, max_day_for_introductions=MAX_INTRO_TIME)
 
 
 
@@ -91,19 +91,19 @@ def set_params_deescalate():
     R0_COEFFVAR_HIGH = 2.2
     R0_COEFFVAR_LOW = 0.15
     P_GLOBALINTXN = 0.2
-    MAX_INTRO_TIME = 365
-    MAX_TIME = 547
+    MAX_INTRO_TIME = 183
+    MAX_TIME = 274
 
 repeats = 200
 def main():
     baseline = repeat_runs_deescalate(repeats, baseline_simulation_monthly_intro)
-    baseline_file = '/Users/julianhomburger/Data/covid/seirsplus/200828/adaptive/baseline.csv'
+    baseline_file = '/Users/julianhomburger/Data/covid/seirsplus/200828/adaptive/baseline200923.csv'
     baseline.to_csv(baseline_file)
     weekly = repeat_runs_deescalate(repeats, weekly_simulation_monthly_intro)
-    weekly_file = '/Users/julianhomburger/Data/covid/seirsplus/200828/adaptive/weekly_testing.csv'
+    weekly_file = '/Users/julianhomburger/Data/covid/seirsplus/200828/adaptive/weekly_testing200923.csv'
     weekly.to_csv(weekly_file)
     weekly_de = repeat_runs_deescalate(repeats, weekly_simulation_deescalate_monthly_intro)
-    weekly_de_file = '/Users/julianhomburger/Data/covid/seirsplus/200828/adaptive/weekly_adaptive_testing.csv'
+    weekly_de_file = '/Users/julianhomburger/Data/covid/seirsplus/200828/adaptive/weekly_adaptive_testing200923.csv'
     weekly_de.to_csv(weekly_de_file)
 
 def get_aggregate_frame(run_data, pop_size):
@@ -148,6 +148,6 @@ def convert_to_ecdf_tables():
     ecdf_all = pd.concat(ecdf_frames)
     overall_all = pd.concat(overall_frames)
     qei_all = pd.concat(qei_ecdf_frames)
-    ecdf_all.to_csv('/Users/julianhomburger/Data/covid/seirsplus/200828/adaptive/adaptive_ecdf200901.csv', index=False)
-    overall_all.to_csv('/Users/julianhomburger/Data/covid/seirsplus/200828/adaptive/overall_ecdf200901.csv', index=False)
-    qei_all.to_csv('/Users/julianhomburger/Data/covid/seirsplus/200828/adaptive/qei_ecdf200901.csv', index=False)
+    ecdf_all.to_csv('/Users/julianhomburger/Data/covid/seirsplus/200828/adaptive/adaptive_ecdf200923.csv', index=False)
+    overall_all.to_csv('/Users/julianhomburger/Data/covid/seirsplus/200828/adaptive/overall_ecdf200923.csv', index=False)
+    qei_all.to_csv('/Users/julianhomburger/Data/covid/seirsplus/200828/adaptive/qei_ecdf200923.csv', index=False)
