@@ -36,7 +36,7 @@ def get_max_qei(df):
 
 def get_aggregate_frame(run_data, pop_size):
     run_data['qei'] = run_data['total_e'] + run_data['total_q'] + run_data['total_i']
-    overall_infections = run_data.groupby(('seed')).agg({'overall_infections':'max', 'qei': 'max', 'total_tests':'max', 'total_intros':'max'})
+    overall_infections = run_data.groupby(('seed')).agg({'overall_infections':'max', 'qei': 'max', 'total_tests':'max'})
     ecdf_frame = ecdf_from_agg_frame(overall_infections, pop_size)
     qei_ecdf_frame = ecdf_from_agg_frame(overall_infections, pop_size, to_summarize='qei')
     return(overall_infections, ecdf_frame, qei_ecdf_frame)
