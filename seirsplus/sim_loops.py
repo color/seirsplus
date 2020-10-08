@@ -757,7 +757,8 @@ class LessThanAbsolutePositivesCadence(CadenceChange):
 def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_seektest_compliance_rate=0.0, isolation_lag=1,
                                 initial_days_between_tests = 0, symptomatic_selfiso_compliance_rate = 0.0, average_introductions_per_day=0,
                                 positive_isolation_compliance_rate = 1, cadence_changes = [],
-                                max_day_for_introductions = 365, max_dt=None, backlog_skipped_intervals = False):
+                                max_day_for_introductions = 365, max_dt=None, backlog_skipped_intervals = False,
+                                full_time = True):
 
     """
     This function runs an adaptive testing approach for RTW programs.
@@ -798,7 +799,11 @@ def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_
     total_tests = 0
     total_intros = 0
     while running:
-        running = model.run_iteration_full_time(max_dt=max_dt)
+        if full_time:
+            running = model.run_iteration_full_time(max_dt=max_dt)
+        else:
+            running = model.run_iteration(max_dt=max_dt)
+
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Introduce exogenous exposures randomly at designated intervals:
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -856,14 +861,14 @@ def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_
                 # print(f'model time {model.t}')
                 # print([int(i) for i in numpy.arange(start=timeOfLastInterventionCheck, stop=int(model.t), step=1.0)[1:]])
                 daynumbers = [int(i) for i in numpy.arange(start=timeOfLastInterventionCheck, stop=int(model.t), step=1.0)[1:]] + daynumbers
-            print(daynumbers)
+
             continuous_test_nodes = continuous_test_intervention(daynumbers, continuous_days_between_tests, continuous_testing_days)
 
             selectedToTest = continuous_test_nodes
             # print(selectedToTest)
             num_tested_today = len(selectedToTest)
             total_tests += num_tested_today
-            print(f'Total Tests: {total_tests}, Tested today: {num_tested_today}, time: {model.t}')
+            # print(f'Total Tests: {total_tests}, Tested today: {num_tested_today}, time: {model.t}')
             newIsolationGroup = run_ze_tests(model, selectedToTest, temporal_falseneg_rates, positive_isolation_compliance)
 
             # We need to build in the ability to isolate positive tests, but
