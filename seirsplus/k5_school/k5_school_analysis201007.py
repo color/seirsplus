@@ -46,7 +46,6 @@ def set_params_k5_schools():
 
     PERCENT_ASYMPTOMATIC = 0.3
     STUDENT_ASYMPTOMATIC_RATE = 0.8
-    STUDENT_SUSCEPTIBILITY = 0.5
 
     BETA_PAIRWISE_MODE  = 'infected'
 
@@ -76,7 +75,6 @@ def repeat_runs_schools(n_repeats, simulation_fxn, save_escalation_time = False,
         # For schools, adjust asymptomatic percentage and susceptibility for students:
         PCT_ASYMPTOMATIC = [ STUDENT_ASYMPTOMATIC_RATE if label=="student" else PERCENT_ASYMPTOMATIC for label in node_labels]
         ALPHA = [ student_susc if label=="student" else 1.0 for label in node_labels]
-        print(np.mean(ALPHA))
         model = ExtSEIRSNetworkModel(G=G_baseline, p=P_GLOBALINTXN,
                                         beta=BETA, sigma=SIGMA, lamda=LAMDA, gamma=GAMMA,
                                         gamma_asym=GAMMA,
@@ -85,7 +83,6 @@ def repeat_runs_schools(n_repeats, simulation_fxn, save_escalation_time = False,
                                         G_Q=G_quarantine, q=q, beta_Q=BETA_Q, isolation_time=isolation_time,
                                         initE=INIT_EXPOSED, seed = i)
         total_tests, total_intros, cadence_changes, new_intros = simulation_fxn(model, MAX_TIME)
-
         thisout = get_regular_series_output(model, MAX_TIME)
         thisout['total_tests'] = total_tests
         thisout['total_intros'] = total_intros
@@ -150,6 +147,20 @@ def no_testing_longdt(model, time):
     """
     return run_rtw_adaptive_testing(model=model, T=time, initial_days_between_tests=0, max_dt=100, full_time=False)
 
+def school_temporal_iso_no_testing(model, time, node_labels):
+    """
+    Simulation of a week of school then no school
+    """
+    temp_iso_group = [True if label=="student" else False for label in node_labels]
+    return run_rtw_adaptive_testing(model=model, T=time, initial_days_between_tests=0, max_dt=0.99, full_time=False, temporal_quarantine=True, temporal_quarantine_nodes = temp_iso_group)
+
+def school_temporal_iso_biweekly_return_testing(model, time, node_labels):
+    """
+    Simulation of a week of school then no school
+    """
+    temp_iso_group = [True if label=="student" else False for label in node_labels]
+    return run_rtw_adaptive_testing(model=model, T=time, initial_days_between_tests=0, max_dt=0.99, full_time=False, temporal_quarantine=True, temporal_quarantine_nodes = temp_iso_group, cadence_testing_days=[0,14])
+
 
 def main():
     output_dir = '/Users/julianhomburger/Data/covid/seirsplus/schools_201014/'
@@ -196,13 +207,30 @@ def main():
     schools_baseline_25_susc_file = output_dir + 'schools_baseline_25_susc.csv'
     schools_baseline_25_susc.to_csv(schools_baseline_25_susc_file)
 
+    schools_baseline_0_susc = repeat_runs_schools(repeats, no_testing, student_susc=0.0)
+    schools_baseline_0_susc_file = output_dir + 'schools_baseline_0_susc.csv'
+    schools_baseline_0_susc.to_csv(schools_baseline_0_susc_file)
+
+    schools_baseline_10_susc = repeat_runs_schools(repeats, no_testing, student_susc=0.10)
+    schools_baseline_10_susc_file = output_dir + 'schools_baseline_10_susc.csv'
+    schools_baseline_10_susc.to_csv(schools_baseline_10_susc_file)
+
+    P_GLOBALINTXN = 0.0
+    schools_baseline_0_susc_ng = repeat_runs_schools(repeats, no_testing, student_susc=0.0)
+    schools_baseline_0_susc_ng_file = output_dir + 'schools_baseline_0_susc_ng.csv'
+    schools_baseline_0_susc_ng.to_csv(schools_baseline_0_susc_ng_file)
+
 
     make_ecdf({
+    schools_baseline_0_susc_file: 'school_susc0',
+    schools_baseline_10_susc_file: 'school_susc10',
     schools_baseline_25_susc_file: 'school_susc25',
     schools_baseline_file: 'school_susc50',
     schools_baseline_half_susc_file:'school_susc75',
     schools_baseline_susc_file: 'school_susc100',
-    general_baseline_file: 'no_structure'},
+    general_baseline_file: 'no_structure',
+    schools_baseline_0_susc_ng_file: 'school_susc0_noglobal'
+    },
     output_dir + 'school_susc_compare201014', N)
 
 def baseline_no_structure():
@@ -214,7 +242,7 @@ def baseline_no_structure():
     baseline_no_struct_file = '/Users/julianhomburger/Data/covid/seirsplus/schools_201014/baseline_no_struct.csv'
     baseline_no_struct.to_csv(baseline_no_struct_file)
 
-def repeat_runs_schools_beta(n_repeats, simulation_fxn, save_escalation_time = False, student_susc = 1.0, set_beta=False, r0_var_low = 0.15, r0_var_high = 2.2):
+def repeat_runs_schools_beta(n_repeats, simulation_fxn, save_escalation_time = False, student_susc = 1.0, set_beta=False, r0_var_low = 0.15, r0_var_high = 2.2, send_labels=False):
     """
     A wrapper for repeating the runs, that takes a simulation function defined above.
 
@@ -236,13 +264,11 @@ def repeat_runs_schools_beta(n_repeats, simulation_fxn, save_escalation_time = F
                                                             teacher_staff_degree=teacher_staff_degree)
         G_quarantine = networkx.classes.function.create_empty_copy(G_baseline)
         r0_coeffvar = np.random.uniform(r0_var_low, r0_var_high)
-        print(r0_coeffvar)
         SIGMA, LAMDA, GAMMA, BETA, BETA_Q = basic_distributions(N, R0_mean = R0_MEAN, R0_coeffvar = r0_coeffvar)
         if set_beta:
             BETA= R0_MEAN/(6.2)
             BETA_Q = R0_MEAN/(6.2)
         # For schools, adjust asymptomatic percentage and susceptibility for students:
-        print(BETA)
         PCT_ASYMPTOMATIC = [ STUDENT_ASYMPTOMATIC_RATE if label=="student" else PERCENT_ASYMPTOMATIC for label in node_labels]
         ALPHA = [ student_susc if label=="student" else 1.0 for label in node_labels]
 
@@ -253,7 +279,10 @@ def repeat_runs_schools_beta(n_repeats, simulation_fxn, save_escalation_time = F
                                         beta_pairwise_mode = BETA_PAIRWISE_MODE,
                                         G_Q=G_quarantine, q=q, beta_Q=BETA_Q, isolation_time=isolation_time,
                                         initE=INIT_EXPOSED, seed = i)
-        total_tests, total_intros, cadence_changes, new_intros = simulation_fxn(model, MAX_TIME)
+        if send_labels:
+            total_tests, total_intros, cadence_changes, new_intros = simulation_fxn(model, MAX_TIME, node_labels=node_labels)
+        else:
+            total_tests, total_intros, cadence_changes, new_intros = simulation_fxn(model, MAX_TIME)
 
         thisout = get_regular_series_output(model, MAX_TIME)
         thisout['total_tests'] = total_tests
@@ -307,37 +336,28 @@ def compare_beta_dists():
                 general_similar_beta_file: 'no_structure_similar_beta',
     }, output_dir + 'vary_beta201014', 528)
 
-## Testing purposes, use extended models implementation
-def repeat_runs_extended(n_repeats, simulation_fxn, save_escalation_time = False):
-    """
-    A wrapper for repeating the runs, that takes a simulation function defined above.
+def compare_temp_strategy():
+    output_dir = '/Users/julianhomburger/Data/covid/seirsplus/schools_201022/'
 
-    NOTE - most of these parameters are defined outside the function.
-    """
-    output_frames = []
-    model_overview = []
-    for i in np.arange(0, n_repeats):
-        G_baseline, G_quarantine, cohorts, teams = build_farz_graph(num_cohorts = num_cohorts, num_nodes_per_cohort = num_nodes_per_cohort, num_teams_per_cohort = number_teams_per_cohort, pct_contacts_intercohort = pct_contacts_intercohort)
+    schools_baseline = repeat_runs_schools(repeats, no_testing, student_susc=1.0)
+    schools_baseline_file = output_dir + 'schools_baseline_susc100.csv'
+    schools_baseline.to_csv(schools_baseline_file)
 
-        SIGMA, LAMDA, GAMMA, BETA, BETA_Q = basic_distributions(N, R0_mean = R0_MEAN, R0_coeffvar = np.random.uniform(R0_COEFFVAR_LOW, R0_COEFFVAR_HIGH))
-        model = ext.ExtSEIRSNetworkModel(G=G_baseline, p=P_GLOBALINTXN,
-                                        beta=BETA, sigma=SIGMA, lamda=LAMDA, gamma=GAMMA,
-                                        gamma_asym=GAMMA, a=PERCENT_ASYMPTOMATIC,
-                                        beta_pairwise_mode = BETA_PAIRWISE_MODE,
-                                        G_Q=G_quarantine, q=q, beta_Q=BETA_Q, isolation_time=isolation_time,
-                                        initE=INIT_EXPOSED, seed = i)
-        total_tests, total_intros, cadence_changes, new_intros = simulation_fxn(model, MAX_TIME)
+    general_baseline = repeat_runs_basic(repeats, no_testing)
+    general_baseline_file = output_dir + 'general_baseline.csv'
+    general_baseline.to_csv(general_baseline_file)
 
-        thisout = get_regular_series_output(model, MAX_TIME)
-        thisout['total_tests'] = total_tests
-        if save_escalation_time:
-            print(escalation_time)
-            thisout['escalation_time'] = escalation_time
-            thisout['escalation_from_screen'] = escalation_from_screen
-        output_frames.append(thisout)
-    return(pd.concat(output_frames))
+    schools_temporal = repeat_runs_schools_beta(repeats, school_temporal_iso_no_testing, send_labels=True)
+    schools_temporal_file = output_dir + 'schools_temporal_q.csv'
+    schools_temporal.to_csv(schools_temporal_file)
 
-def extended_models():
-        general_ext = repeat_runs_basic(repeats, no_testing)
-        general_ext_file = '/Users/julianhomburger/Data/covid/seirsplus/schools_201014/general_ext.csv'
-        general_ext.to_csv(general_ext_file)
+    schools_temporal_return_test = repeat_runs_schools_beta(repeats, school_temporal_iso_biweekly_return_testing, send_labels=True)
+    schools_temporal_return_test_file = output_dir + 'schools_temporal_q_biweekly_test.csv'
+    schools_temporal_return_test.to_csv(schools_temporal_return_test_file)
+
+    make_ecdf({
+        schools_baseline_file: 'schools_baseline_susc100',
+        general_baseline_file: 'no_structure',
+        schools_temporal_file: 'school_week_on_off',
+        schools_temporal_return_test_file: 'school_week_on_off_return_test'
+    }, output_dir + 'schools_temp_q_test', 528)

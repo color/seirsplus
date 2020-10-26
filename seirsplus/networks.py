@@ -843,7 +843,7 @@ def generate_K5_school_contact_network(num_grades, num_classrooms_per_grade, cla
     for classroomID, studentIDs in classrooms_studentIDs.items():
         for studentID in studentIDs:
             schoolNetwork.add_edge(curTeacherID, studentID)
-            print("add_edge("+str(curTeacherID)+", "+str(studentID)+")")
+            # print("add_edge("+str(curTeacherID)+", "+str(studentID)+")")
             classrooms_teacherIDs[classroomID] = curTeacherID
         curTeacherID += 1
 
