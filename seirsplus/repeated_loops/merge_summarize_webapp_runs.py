@@ -37,7 +37,11 @@ def get_max_qei(df):
 def get_aggregate_frame(run_data, pop_size):
     run_data['qei'] = run_data['total_e'] + run_data['total_q'] + run_data['total_i']
     run_data['furthest_time_point'] = (run_data['qei'] > 0) * run_data['time'] # math-magic to get maximum timepoint where qei > 0
-    overall_infections = run_data.groupby(('seed')).agg({'overall_infections':'max', 'qei': 'max', 'total_tests':'max', 'furthest_time_point':'max'})
+    if 'teacher_infections' in run_data.columns:
+        overall_infections = run_data.groupby(('seed')).agg({'overall_infections':'max', 'qei': 'max', 'total_tests':'max', 'furthest_time_point':'max',
+            'teacher_infections':'max', 'student_infections':'max', 'staff_infections':'max', 'initial_exposed_group': 'first'})
+    else:
+        overall_infections = run_data.groupby(('seed')).agg({'overall_infections':'max', 'qei': 'max', 'total_tests':'max', 'furthest_time_point':'max'})
     ecdf_frame = ecdf_from_agg_frame(overall_infections, pop_size)
     qei_ecdf_frame = ecdf_from_agg_frame(overall_infections, pop_size, to_summarize='qei')
     return(overall_infections, ecdf_frame, qei_ecdf_frame)
