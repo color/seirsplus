@@ -292,5 +292,5 @@ def main(n_repeats = 1000):
     #     testing_cadence, introduction_rate, student_susc, student_block_strategy, quarantine_strategy, r0 = sys.argv[1].split(',')
     output_frame.to_csv(results_name, index=False)
 
-if '__name__' == 'main':
+if __name__ == 'main':
     main()
