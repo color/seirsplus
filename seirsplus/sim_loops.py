@@ -685,7 +685,7 @@ def cadence_tests(model, cadence_testing_days, node_labels=None, groups_to_test 
                                      & (nodeStates != model.F)
                                     ).flatten()
         if node_labels and groups_to_test:
-            group_member_tests = np.array([i for i,j in enumerate(node_labels) if j in groups_to_test])
+            group_member_tests = numpy.array([i for i,j in enumerate(node_labels) if j in groups_to_test])
             testingPool = numpy.intersect1d(testingPool, group_member_tests)
     else:
 
@@ -979,8 +979,9 @@ def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_
     return total_tests, total_intros, cadence_change_days, new_intros
 
 
-def run_rtw_group_testing(model, T, testing_compliance_rate=1.0, symptomatic_seektest_compliance_rate=0.0, isolation_lag=1,
-                                initial_days_between_tests = 0, symptomatic_selfiso_compliance_rate = 0.0, average_introductions_per_day=0,
+def run_rtw_group_testing(model, T, testing_compliance_rate=1.0,
+                                symptomatic_seektest_compliance_rate=0.0, isolation_lag=1,
+                                initial_days_between_tests = 0, symptomatic_selfiso_compliance_rate = 0.0,
                                 positive_isolation_compliance_rate = 1, cadence_changes = [],
                                 max_day_for_introductions = 365, max_dt=None, backlog_skipped_intervals = False,
                                 temporal_quarantine = False, temporal_quarantine_nodes=[], temporal_quarantine_days = 7,
@@ -988,7 +989,10 @@ def run_rtw_group_testing(model, T, testing_compliance_rate=1.0, symptomatic_see
                                 group_testing_days = None,
                                 node_labels = None, groups_to_test = None,
                                 isolation_compliance_positive_groupmate_rate = 0.0,
-                                parameter_cadences = None):
+                                parameter_cadences = None,
+                                isolation_groups = [],
+                                full_time = False,
+                                introduction_dates = []):
 
     """
     This function runs a group testing approach based on node labels, allowing different
@@ -1025,19 +1029,25 @@ def run_rtw_group_testing(model, T, testing_compliance_rate=1.0, symptomatic_see
     positive_result_history = [] # stores number of positives identified on a specific day
     cadence_change_days = []
     new_intros = []
-
+    if len(introduction_dates) > 0:
+        next_intro_date = introduction_dates.pop(0)
+    else:
+        next_intro_date = T + 1
     model.tmax  = T
     running     = True
     total_tests = 0
     total_intros = 0
-
+    numIsolated_positiveGroupmate = 0
+    numIsolated = 0
     in_temp_q = False
 
     isolated_by_test = []
 
     while running:
-
-        running = model.run_iteration(max_dt = max_dt)
+        if full_time:
+            running = model.run_iteration_full_time(max_dt = max_dt)
+        else:
+            running = model.run_iteration(max_dt = max_dt)
 
         if(int(model.t)!=int(timeOfLastParameterUpdate) and parameter_cadences is not None):
 
@@ -1050,19 +1060,17 @@ def run_rtw_group_testing(model, T, testing_compliance_rate=1.0, symptomatic_see
                     model.update_parameters()
 
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # Introduce exogenous exposures randomly at designated intervals:
+        # Introduce exogenous exposures designated dates:
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        if(int(model.t)!=int(timeOfLastIntroductionCheck) and int(model.t) < max_day_for_introductions):
-            # Ensures this loop happens at most once per day
-            timeOfLastIntroductionCheck = model.t
+        while int(model.t) >= next_intro_date:
+            model.introduce_exposures(1)
+            new_intros.append(int(model.t))
+            total_intros += 1
+            try:
+                next_intro_date = introduction_dates.pop(0)
+            except IndexError: # hit the end of the list
+                next_intro_date = T + 1
 
-            numNewExposures=numpy.random.poisson(lam=average_introductions_per_day)
-
-            model.introduce_exposures(num_new_exposures=numNewExposures)
-            if(numNewExposures > 0):
-                new_intros.append(int(model.t))
-                total_intros += numNewExposures
-                print("[NEW EXPOSURE @ t = %.2f (%d exposed)]" % (model.t, numNewExposures))
 
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Execute testing policy at designated intervals:
@@ -1098,7 +1106,7 @@ def run_rtw_group_testing(model, T, testing_compliance_rate=1.0, symptomatic_see
             if group_testing_days:
                 for group in group_testing_days.keys():
                     # Append tests for each group
-                    cadence_selection_nodes.append(cadence_tests(model, group_testing_days[group], node_labels=node_labels, groups_to_test=group))
+                    cadence_selection_nodes.extend(cadence_tests(model, group_testing_days[group], node_labels=node_labels, groups_to_test=group))
             else:
                 cadence_selection_nodes = cadence_tests(model, cadence_testing_days, node_labels=node_labels, groups_to_test=groups_to_test)
 
@@ -1123,7 +1131,7 @@ def run_rtw_group_testing(model, T, testing_compliance_rate=1.0, symptomatic_see
             if len(newIsolationGroup) > 0:
                 isolation_dict[time_to_isolate].extend(newIsolationGroup)
 
-            numIsolated = 0
+
             # dictionary is going to change during iteration so need to copy key list
             days_to_check = list(isolation_dict.keys())
             for iso_check in days_to_check:
@@ -1142,7 +1150,7 @@ def run_rtw_group_testing(model, T, testing_compliance_rate=1.0, symptomatic_see
                                     isolationGroupmates = next((group for group in isolation_groups if isolationNode in group), None)
                                     if(isolationGroupmates is not None):
                                         for isolationGroupmate in isolationGroupmates:
-                                            if(isolationGroupmate != testNode):
+                                            if(isolationGroupmate != isolationNode):
                                                 if(isolation_compliance_positive_groupmate[isolationGroupmate]):
                                                     numIsolated_positiveGroupmate += 1
                                                     model.set_isolation(isolationGroupmate, True)
@@ -1157,6 +1165,6 @@ def run_rtw_group_testing(model, T, testing_compliance_rate=1.0, symptomatic_see
 
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     total_r = max(model.total_num_recovered())
-    print("[Finished @ t = %.2f (%d (%.2f%%) infected)]" % (model.t, currentNumInfected, currentPctInfected*100))
+    print("Finished @ t = %.2f (%d (%.2f%%) infected)" % (model.t, currentNumInfected, currentPctInfected*100))
     print(f"Total Recovered: {total_r}")
-    return total_tests, total_intros, cadence_change_days, new_intros
+    return total_tests, total_intros, numIsolated_positiveGroupmate, numIsolated

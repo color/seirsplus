@@ -13,6 +13,23 @@ import k5_school.k5_school_analysis201007 as k5_schools
 
 from repeated_loops.merge_summarize_webapp_runs import *
 
+def assign_new_cols(df, newdict):
+    for x in newdict.keys():
+        df[x] = newdict[x]
+
+
+def get_poisson_dates(intro_rate, total_days, seed):
+    """
+    Given a rate and total days, plus a seed, gives the date of poisson intros.
+    Allows setting this outside of the loop based on seed for appropriate comparisons
+    across groups.
+    """
+    np.random.seed(seed)
+    num_intros = np.random.poisson(total_days * intro_rate)
+    intro_days = list(np.sort(np.random.uniform(low=0, high=total_days-1, size=num_intros).astype(int)))
+    return(intro_days)
+
+
 
 def write_parallel_inputs(pfilename):
     # Writes a file with arguments for the parallel files
@@ -25,12 +42,10 @@ def write_parallel_inputs(pfilename):
     testing_cadence = ['none', 't_weekly_s_weekly', 't_weekly_s_monthly',
         't_weekly_s_none', 't_twiceweek_s_none', 't_twiceweek_s_twiceweek'] # TODO: update to match school testing cadences
 
-    testing_cadence, introduction_rate, student_schedule, quaratine_strategy, r0
-
     pfile = open(pfilename, "w")
-    for y in itertools.product(testing_cadence, introduction_rate, tats):
-        c, ir, t = y
-        pfile.write(f'{c},{ir},{t}\n')
+    for y in itertools.product(testing_cadence, introduction_rate, student_susceptibility, student_schedule, quarantine_strategy, r0_list):
+        tc, ir, ss, sb, qs, r0 = y
+        pfile.write(f'{tc},{ir},{ss},{sb},{qs},{r0}\n')
     pfile.close()
 
 def get_param_cadences(cadence_type, params_dict):
@@ -136,11 +151,12 @@ def get_testing_dictionary(testing_code):
       't_twiceweek_s_none': {'teacher':[0, 3, 7, 10, 14, 17, 21, 24], 'staff':[0, 3, 7, 10, 14, 17, 21, 24], 'student':[]},
       't_twiceweek_s_twiceweek': {'teacher':[0, 3, 7, 10, 14, 17, 21, 24], 'staff':[0, 3, 7, 10, 14, 17, 21, 24], 'student':[0, 3, 7, 10, 14, 17, 21, 24]},
     }
+    return(testing_dict[testing_code])
 
 
 
 def main(n_repeats = 1000):
-    testing_cadence, introduction_rate, student_susc, student_block_strategy, quaratine_strategy, r0 = sys.argv[1].split(',')
+    testing_cadence, introduction_rate, student_susc, student_block_strategy, quarantine_strategy, r0 = sys.argv[1].split(',')
 
     # Send parameters to the testing loop
     output_frames = []
@@ -163,6 +179,10 @@ def main(n_repeats = 1000):
     else:
         num_student_blocks = 2
 
+    if quarantine_strategy == 'group':
+        isolation_compliance_positive_groupmate = 1.0
+    else:
+        isolation_compliance_positive_groupmate = 0.0
     # Total N
     N = num_grades * num_classrooms_per_grade * class_sizes + num_staff + num_grades*num_classrooms_per_grade
 
@@ -171,12 +191,15 @@ def main(n_repeats = 1000):
 
     INIT_EXPOSED = 1
     P_GLOBALINTXN = 0.2 # Global interaction
-    MAX_TIME = 365
+    MAX_TIME = 180
 
     PERCENT_ASYMPTOMATIC = 0.3
     STUDENT_ASYMPTOMATIC_RATE = 0.45
     P_GLOBALINTXN = [0.2] * N
     BETA_PAIRWISE_MODE  = 'infected'
+
+    group_testing_cadence = get_testing_dictionary(testing_cadence)
+
 
     for i in np.arange(0, n_repeats):
         (networks,
@@ -195,7 +218,7 @@ def main(n_repeats = 1000):
             teacher_staff_degree=teacher_staff_degree)
 
         SIGMA, LAMDA, GAMMA, BETA, BETA_Q = basic_distributions(N, R0_mean = R0_MEAN, R0_coeffvar = np.random.uniform(R0_COEFFVAR_LOW, R0_COEFFVAR_HIGH))
-
+        intro_dates = get_poisson_dates(1/introduction_rate, MAX_TIME, i)
         # For schools, adjust asymptomatic percentage and susceptibility for students:
         PCT_ASYMPTOMATIC = [ STUDENT_ASYMPTOMATIC_RATE if label=="student" else PERCENT_ASYMPTOMATIC for label in node_labels]
         ALPHA = [ student_susc if label=="student" else 1.0 for label in node_labels]
@@ -216,7 +239,6 @@ def main(n_repeats = 1000):
         p_cadence = get_param_cadences(student_block_strategy, p_paramSets)
         network_cadence = get_param_cadences(student_block_strategy, networks)
         param_cadence_dict = {'G':network_cadence, 'p':p_cadence}
-        group_testing_cadence = get_testing_dictionary(testing_cadence)
         model = seir_models.ExtSEIRSNetworkModel(G=networks['onsite-all'], p=P_GLOBALINTXN,
                                         beta=BETA, sigma=SIGMA, lamda=LAMDA, gamma=GAMMA,
                                         gamma_asym=GAMMA,
@@ -226,7 +248,7 @@ def main(n_repeats = 1000):
                                         initE=INIT_EXPOSED, seed = i)
         initial_exposed_group = get_group_initE(model, node_labels)
 
-        total_tests, total_intros, cadence_changes, new_intros = sim_loops.run_rtw_group_testing(
+        total_tests, total_intros, num_isolated_positive_group, num_isolated = sim_loops.run_rtw_group_testing(
                     model,
                     T=MAX_TIME,
                     symptomatic_selfiso_compliance_rate = 0.2,
@@ -234,13 +256,16 @@ def main(n_repeats = 1000):
                     node_labels=node_labels,
                     parameter_cadences = param_cadence_dict,
                     group_testing_days = group_testing_cadence,
-                    isolation_compliance_positive_groupmate_rate = 1.0
+                    isolation_compliance_positive_groupmate_rate = isolation_compliance_positive_groupmate,
+                    isolation_groups = iso_groups,
+                    introduction_dates = intro_dates,
+                    full_time = True
                     )
         thisout = get_regular_series_output(model, MAX_TIME)
         thisout['total_tests'] = total_tests
         thisout['total_intros'] = total_intros
-        thisout['cadence_changes'] = thisout['time'].isin([int(a) for a in cadence_changes])
-        thisout['new_intros'] = thisout['time'].isin([int(a) for a in new_intros])
+        thisout['num_isolated_positive_group'] = num_isolated_positive_group
+        thisout['num_isolated'] = num_isolated
         group_infections = get_group_final_infections(model, node_labels)
         thisout['teacher_infections'] = group_infections['teacher']
         thisout['student_infections'] = group_infections['student']
@@ -248,9 +273,19 @@ def main(n_repeats = 1000):
         thisout['initial_exposed_group'] = initial_exposed_group
 
         output_frames.append(thisout)
-
-
-
+    output_frame = pd.concat(output_frames)
+    param_dict ={
+        'testing_cadence': testing_cadence,
+        'r0': r0,
+        'student_susc': student_susc,
+        'introduction_rate': introduction_rate,
+        'student_block_strategy': student_block_strategy,
+        'quarantine_strategy': quarantine_strategy,
+    }
+    assign_new_cols(output_frame, param_dict)
+    results_name = f'{testing_cadence}_{r0}_{student_susc}_{introduction_rate}_{student_block_strategy}_{quarantine_strategy}_results.csv.gz'
+    #     testing_cadence, introduction_rate, student_susc, student_block_strategy, quarantine_strategy, r0 = sys.argv[1].split(',')
+    output_frame.to_csv(results_name, index=False)
 
 if '__name__' == 'main':
     main()
