@@ -1,3 +1,8 @@
+#### Need to install python3 tkinter
+# sudo apt-get install python3-tk
+#### Need to add seirsplus to pythonpath
+# export PYTHONPATH=/color/seirsplus/seirsplus/:$PYTHONPATH
+
 import sys
 import networkx
 import numpy as np
