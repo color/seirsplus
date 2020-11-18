@@ -2714,7 +2714,7 @@ class ExtSEIRSNetworkModel():
 
         else:
 
-            tau = 0.05
+            tau = 0.10
             self.t += tau
             self.timer_state += tau
 
