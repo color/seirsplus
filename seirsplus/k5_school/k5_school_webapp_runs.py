@@ -166,8 +166,8 @@ def main(n_repeats = 1000):
     # Send parameters to the testing loop
     output_frames = []
     model_overview = []
-
-    R0_MEAN = r0
+    student_susc = float(student_susc)
+    R0_MEAN = float(r0)
     R0_COEFFVAR_LOW = 0.15
     R0_COEFFVAR_HIGH = 2.2
 
@@ -223,7 +223,7 @@ def main(n_repeats = 1000):
             teacher_staff_degree=teacher_staff_degree)
 
         SIGMA, LAMDA, GAMMA, BETA, BETA_Q = basic_distributions(N, R0_mean = R0_MEAN, R0_coeffvar = np.random.uniform(R0_COEFFVAR_LOW, R0_COEFFVAR_HIGH))
-        intro_dates = get_poisson_dates(1/introduction_rate, MAX_TIME, i)
+        intro_dates = get_poisson_dates(1/float(introduction_rate), MAX_TIME, i)
         # For schools, adjust asymptomatic percentage and susceptibility for students:
         PCT_ASYMPTOMATIC = [ STUDENT_ASYMPTOMATIC_RATE if label=="student" else PERCENT_ASYMPTOMATIC for label in node_labels]
         ALPHA = [ student_susc if label=="student" else 1.0 for label in node_labels]
@@ -292,5 +292,5 @@ def main(n_repeats = 1000):
     #     testing_cadence, introduction_rate, student_susc, student_block_strategy, quarantine_strategy, r0 = sys.argv[1].split(',')
     output_frame.to_csv(results_name, index=False)
 
-if __name__ == 'main':
+if __name__ == '__main__':
     main()
