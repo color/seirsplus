@@ -18,6 +18,8 @@ import k5_school.k5_school_analysis201007 as k5_schools
 
 from repeated_loops.merge_summarize_webapp_runs import *
 
+import util.s3
+
 def assign_new_cols(df, newdict):
     for x in newdict.keys():
         df[x] = newdict[x]
@@ -295,6 +297,8 @@ def main(n_repeats = 1000):
     results_name = f'{testing_cadence}_{r0}_{student_susc}_{introduction_rate}_{student_block_strategy}_{quarantine_strategy}_results.csv.gz'
     #     testing_cadence, introduction_rate, student_susc, student_block_strategy, quarantine_strategy, r0 = sys.argv[1].split(',')
     output_frame.to_csv(results_name, index=False)
+    util.s3.upload_from_file(results_name, 'dev-color-bioinformatics', f'ml_models/seirsplus/k5_schools/{results_name}')
+
 
 if __name__ == '__main__':
     main()
