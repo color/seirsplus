@@ -4,6 +4,7 @@
 # export PYTHONPATH=/color/seirsplus/seirsplus/:$PYTHONPATH
 
 import sys
+sys.path.append('/resources/seirsplus/seirsplus/')
 import networkx
 import numpy as np
 import pandas as pd
@@ -162,8 +163,8 @@ def get_testing_dictionary(testing_code):
 
 
 
-def main(n_repeats = 1000):
-    testing_cadence, introduction_rate, student_susc, student_block_strategy, quarantine_strategy, r0 = sys.argv[1].split(',')
+def main(input, n_repeats = 1000):
+    testing_cadence, introduction_rate, student_susc, student_block_strategy, quarantine_strategy, r0 = input[1].split(',')
 
     # Send parameters to the testing loop
     output_frames = []
@@ -296,9 +297,9 @@ def main(n_repeats = 1000):
     assign_new_cols(output_frame, param_dict)
     results_name = f'{testing_cadence}_{r0}_{student_susc}_{introduction_rate}_{student_block_strategy}_{quarantine_strategy}_results.csv.gz'
     #     testing_cadence, introduction_rate, student_susc, student_block_strategy, quarantine_strategy, r0 = sys.argv[1].split(',')
-    output_frame.to_csv(results_name, index=False)
+    output_frame.to_csv(results_name, index=False, compression='gzip')
     util.s3.upload_from_file(results_name, 'dev-color-bioinformatics', f'ml_models/seirsplus/k5_schools/{results_name}')
 
 
 if __name__ == '__main__':
-    main()
+    main(sys.argv[1])
