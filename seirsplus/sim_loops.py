@@ -655,13 +655,13 @@ def run_rtw_testing_sim(model, T,
 
 def symptomatic_self_isolation(model, symptomatic_selfiso_compliance):
     symptomaticNodes = numpy.argwhere((model.X.flatten()==model.I_sym)).flatten()
-    numSelfIsolated_symptoms = 0
+    nodesSelfIsolated_symptoms = []
     for symptomaticNode in symptomaticNodes:
         if(symptomatic_selfiso_compliance[symptomaticNode]):
             if(model.X[symptomaticNode] == model.I_sym):
                 model.set_isolation(symptomaticNode, True)
-                numSelfIsolated_symptoms += 1
-    return numSelfIsolated_symptoms
+                nodesSelfIsolated_symptoms.append(symptomaticNode)
+    return nodesSelfIsolated_symptoms
 
 def continuous_test_intervention(timepoints, continuous_days_between_tests, continuous_testing_days):
     if (continuous_days_between_tests == 0): # If no testing, return empty list
@@ -673,6 +673,26 @@ def continuous_test_intervention(timepoints, continuous_days_between_tests, cont
         testing_date = int(k % continuous_days_between_tests)
         testing_strategy_selection.extend(numpy.argwhere(numpy.array(continuous_testing_days) == testing_date).flatten())
     return(testing_strategy_selection)
+
+def cadence_tests(model, cadence_testing_days, node_labels=None, groups_to_test = None):
+    cadenceDayNumber = int(model.t % 28)
+    nodeStates = model.X.flatten()
+    if(cadenceDayNumber in cadence_testing_days):
+        testingPool = numpy.argwhere(
+                                     (nodeStates != model.R)
+                                     & (nodeStates != model.Q_R)
+                                     & (nodeStates != model.H)
+                                     & (nodeStates != model.F)
+                                    ).flatten()
+        if node_labels and groups_to_test:
+            group_member_tests = numpy.array([i for i,j in enumerate(node_labels) if j in groups_to_test])
+            testingPool = numpy.intersect1d(testingPool, group_member_tests)
+    else:
+
+        testingPool = []
+    return(testingPool)
+
+
 
 def run_ze_tests(model, selectedToTest, temporal_falseneg_rates, positive_isolation_compliance):
     """
@@ -758,7 +778,11 @@ def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_
                                 initial_days_between_tests = 0, symptomatic_selfiso_compliance_rate = 0.0, average_introductions_per_day=0,
                                 positive_isolation_compliance_rate = 1, cadence_changes = [],
                                 max_day_for_introductions = 365, max_dt=None, backlog_skipped_intervals = False,
-                                full_time = True):
+                                full_time = True,
+                                parameter_cadences=None,
+                                isolation_groups = None,
+
+                                cadence_testing_days = []):
 
     """
     This function runs an adaptive testing approach for RTW programs.
@@ -779,6 +803,7 @@ def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_
 
     timeOfLastInterventionCheck = -1
     timeOfLastIntroductionCheck = -1
+    timeOfLastParameterUpdate = -1
 
     testing_compliance              = (numpy.random.rand(model.numNodes) < testing_compliance_rate)
     symptomatic_seektest_compliance = (numpy.random.rand(model.numNodes) < symptomatic_seektest_compliance_rate)
@@ -798,11 +823,35 @@ def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_
     running     = True
     total_tests = 0
     total_intros = 0
+
+    in_temp_q = False
+
+    isolated_by_test = []
+
     while running:
-        if full_time:
-            running = model.run_iteration_full_time(max_dt=max_dt)
-        else:
-            running = model.run_iteration(max_dt=max_dt)
+
+        running = model.run_iteration(max_dt=max_dt)
+
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # Update underlying network structure:
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        if(int(model.t)!=int(timeOfLastParameterUpdate) and parameter_cadences is not None):
+
+            timeOfLastParameterUpdate = model.t
+
+            for param, param_cadence in parameter_cadences.items():
+                if(len(param_cadence) > 0):
+                    parameterCadenceDayNumber = int(model.t % len(param_cadence))
+                    model.parameters.update({param: param_cadence[parameterCadenceDayNumber]})
+                    model.update_parameters()
+
+            # import networkx
+            # import matplotlib.pyplot as pyplot
+            # print(model.t)
+            # print(model.p.flatten())
+            # networkx.draw(model.G, pos=networkx.spring_layout(model.G, weight='layout_weight'), node_size=20, node_color='tab:blue', edge_color='lightgray', alpha=0.5)#, node_shape='s')
+            # pyplot.show()
+
 
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Introduce exogenous exposures randomly at designated intervals:
@@ -835,6 +884,25 @@ def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_
                         cadence_change_days.append(model.t)
 
 
+            # Check if temporal quarantine occurs
+            if (int(model.t) % temporal_quarantine_days == 0) and temporal_quarantine and int(model.t)>0:
+
+                # if currently not in temporal_quarantine,
+                if not in_temp_q:
+                    print(f'Beginning temporal isolation at time {model.t}')
+                    for i,k in enumerate(temporal_quarantine_nodes):
+                        if k: # Node selected for temporal isolation
+                            model.set_isolation(i, False)
+                    in_temp_q = True
+                else:
+                    # Remove temporal isolation, unless tested positive
+                    print(f'Removing temporal isolation at time {model.t}')
+                    for i,k in enumerate(temporal_quarantine_nodes):
+                        if k and i not in isolated_by_test: # Node selected for temporal isolation
+                            model.set_isolation(i, True)
+                    in_temp_q = False
+
+
             # Ensures this loop happens at most once per day
 
 
@@ -864,7 +932,10 @@ def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_
 
             continuous_test_nodes = continuous_test_intervention(daynumbers, continuous_days_between_tests, continuous_testing_days)
 
-            selectedToTest = continuous_test_nodes
+            cadence_selection_nodes = cadence_tests(model, cadence_testing_days)
+
+            to_test_all = list(continuous_test_nodes) + list(cadence_selection_nodes)
+            selectedToTest = list(set(to_test_all)) # get unique nodes
             # print(selectedToTest)
             num_tested_today = len(selectedToTest)
             total_tests += num_tested_today
@@ -893,6 +964,7 @@ def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_
                     if len(isolationGroup) > 0:
                         for isolationNode in isolationGroup:
                             model.set_isolation(isolationNode, True)
+                            isolated_by_test.append(isolationNode)
                             numIsolated += 1
             positive_result_history.append(numIsolated)
             # print("\t"+str(numIsolated)+" entered isolation from testing")
@@ -901,11 +973,198 @@ def run_rtw_adaptive_testing(model, T, testing_compliance_rate=1.0, symptomatic_
             #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    total_r = max(model.total_num_recovered())
     print("[Finished @ t = %.2f (%d (%.2f%%) infected)]" % (model.t, currentNumInfected, currentPctInfected*100))
-
+    print(f"Total Recovered: {total_r}")
     return total_tests, total_intros, cadence_change_days, new_intros
 
 
+def run_rtw_group_testing(model, T, testing_compliance_rate=1.0,
+                                symptomatic_seektest_compliance_rate=0.0, isolation_lag=1,
+                                initial_days_between_tests = 0, symptomatic_selfiso_compliance_rate = 0.0,
+                                positive_isolation_compliance_rate = 1, cadence_changes = [],
+                                max_day_for_introductions = 365, max_dt=None, backlog_skipped_intervals = False,
+                                temporal_quarantine = False, temporal_quarantine_nodes=[], temporal_quarantine_days = 7,
+                                cadence_testing_days = [],
+                                group_testing_days = None,
+                                node_labels = None, groups_to_test = None,
+                                isolation_compliance_positive_groupmate_rate = 0.0,
+                                parameter_cadences = None,
+                                isolation_groups = [],
+                                full_time = False,
+                                introduction_dates = []):
 
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    """
+    This function runs a group testing approach based on node labels, allowing different
+    testing cadences to be set per group.
+
+    Parameter cadences are a dictionionary of values, with a length appropriate to the days to cycle on.
+    For example, we would have something like:
+    NETWORK_CADENCE = [net_day1, net_day2, net_day3,...]
+    P_CADENCE = [p1, p2, p3, ...]
+    PARAM_CADENCES = {'G': NETWORK_CADENCE,
+                  'p': P_CADENCE}
+    These changes will repeat until the end of the simulation
+
+    """
+
+
+    temporal_falseneg_rates = get_temporal_false_negative_rates(model)
+
+    timeOfLastInterventionCheck = -1
+    timeOfLastIntroductionCheck = -1
+    timeOfLastParameterUpdate = -1
+
+    testing_compliance              = (numpy.random.rand(model.numNodes) < testing_compliance_rate)
+    symptomatic_seektest_compliance = (numpy.random.rand(model.numNodes) < symptomatic_seektest_compliance_rate)
+    symptomatic_selfiso_compliance  = (numpy.random.rand(model.numNodes) < symptomatic_selfiso_compliance_rate)
+    positive_isolation_compliance   = (numpy.random.rand(model.numNodes) < positive_isolation_compliance_rate)
+    isolation_compliance_positive_groupmate = (numpy.random.rand(model.numNodes) < isolation_compliance_positive_groupmate_rate)
+
+    ## Set up independent days/groups for continuous testing
+    continuous_testing_days = set_continuous_testing_days(model, initial_days_between_tests)
+    continuous_days_between_tests = initial_days_between_tests
+    isolation_dict = defaultdict(list)
+
+    positive_result_history = [] # stores number of positives identified on a specific day
+    cadence_change_days = []
+    new_intros = []
+    if len(introduction_dates) > 0:
+        next_intro_date = introduction_dates.pop(0)
+    else:
+        next_intro_date = T + 1
+    model.tmax  = T
+    running     = True
+    total_tests = 0
+    total_intros = 0
+    numIsolated_positiveGroupmate = 0
+    numIsolated = 0
+    in_temp_q = False
+
+    isolated_by_test = []
+
+    while running:
+        if full_time:
+            running = model.run_iteration_full_time(max_dt = max_dt)
+        else:
+            running = model.run_iteration(max_dt = max_dt)
+
+        if(int(model.t)!=int(timeOfLastParameterUpdate) and parameter_cadences is not None):
+
+            timeOfLastParameterUpdate = model.t
+
+            for param, param_cadence in parameter_cadences.items():
+                if(len(param_cadence) > 0):
+                    parameterCadenceDayNumber = int(model.t % len(param_cadence))
+                    model.parameters.update({param: param_cadence[parameterCadenceDayNumber]})
+                    model.update_parameters()
+
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # Introduce exogenous exposures designated dates:
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        while int(model.t) >= next_intro_date:
+            model.introduce_exposures(1)
+            new_intros.append(int(model.t))
+            total_intros += 1
+            try:
+                next_intro_date = introduction_dates.pop(0)
+            except IndexError: # hit the end of the list
+                next_intro_date = T + 1
+
+
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # Execute testing policy at designated intervals:
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+        if(int(model.t)!=int(timeOfLastInterventionCheck)):
+
+            # Symptomatic isolation
+
+            currentNumInfected = model.total_num_infected()[model.tidx]
+            currentPctInfected = model.total_num_infected()[model.tidx]/model.numNodes
+            #----------------------------------------
+            # Manually enforce that some percentage of symptomatic cases self-isolate without a test
+            #----------------------------------------
+            symptomatic_self_isolation_nodes = symptomatic_self_isolation(model, symptomatic_selfiso_compliance)
+            # print("\t"+str(numSelfIsolated_symptoms)+" self-isolated due to symptoms")
+
+            #----------------------------------------
+            # Update the nodeStates list after self-isolation updates to model.X:
+            #----------------------------------------
+            nodeStates = model.X.flatten()
+
+            # Continuous testing intervention
+            daynumbers = [int(model.t)]
+            if (backlog_skipped_intervals):
+                # print(f'time of last int check {timeOfLastInterventionCheck}')
+                # print(f'model time {model.t}')
+                # print([int(i) for i in numpy.arange(start=timeOfLastInterventionCheck, stop=int(model.t), step=1.0)[1:]])
+                daynumbers = [int(i) for i in numpy.arange(start=timeOfLastInterventionCheck, stop=int(model.t), step=1.0)[1:]] + daynumbers
+
+            continuous_test_nodes = continuous_test_intervention(daynumbers, continuous_days_between_tests, continuous_testing_days)
+            cadence_selection_nodes = []
+            if group_testing_days:
+                for group in group_testing_days.keys():
+                    # Append tests for each group
+                    cadence_selection_nodes.extend(cadence_tests(model, group_testing_days[group], node_labels=node_labels, groups_to_test=group))
+            else:
+                cadence_selection_nodes = cadence_tests(model, cadence_testing_days, node_labels=node_labels, groups_to_test=groups_to_test)
+
+            to_test_all = list(continuous_test_nodes) + list(cadence_selection_nodes)
+            selectedToTest = list(set(to_test_all)) # get unique nodes
+            # print(selectedToTest)
+            num_tested_today = len(selectedToTest)
+            total_tests += num_tested_today
+            # print(f'Total Tests: {total_tests}, Tested today: {num_tested_today}, time: {model.t}')
+            newIsolationGroup = run_ze_tests(model, selectedToTest, temporal_falseneg_rates, positive_isolation_compliance)
+
+            # We need to build in the ability to isolate positive tests, but
+            # accounting for test turn-around time
+
+            # Here, we are storing the list of individuals to be isolated in a dictionary
+            # where the key is the date of the model that they should be isolated on
+            # then, we just check to see which date/keys are equal to or less than the current time,
+            # isolate the individuals in that list, and remove that element from the dictionary
+            # Account for test turn around time
+            time_to_isolate = int(model.t) + isolation_lag
+            # If any positives are going to be ID'd, add to the isolation queue
+            if len(newIsolationGroup) > 0:
+                isolation_dict[time_to_isolate].extend(newIsolationGroup)
+
+
+            # dictionary is going to change during iteration so need to copy key list
+            days_to_check = list(isolation_dict.keys())
+            for iso_check in days_to_check:
+                if iso_check <= int(model.t):
+                    isolationGroup = isolation_dict.pop(iso_check)
+                    if len(isolationGroup) > 0:
+                        for isolationNode in isolationGroup:
+                            model.set_isolation(isolationNode, True)
+                            isolated_by_test.append(isolationNode)
+                            numIsolated += 1
+
+                            # If group isolation is on, isolate the full group
+                            if(any(isolation_compliance_positive_groupmate)):
+                                # Isolate the groupmates of the node
+                                if(isolation_groups is not None and any(isolation_compliance_positive_groupmate)):
+                                    isolationGroupmates = next((group for group in isolation_groups if isolationNode in group), None)
+                                    if(isolationGroupmates is not None):
+                                        for isolationGroupmate in isolationGroupmates:
+                                            if(isolationGroupmate != isolationNode):
+                                                if(isolation_compliance_positive_groupmate[isolationGroupmate]):
+                                                    numIsolated_positiveGroupmate += 1
+                                                    model.set_isolation(isolationGroupmate, True)
+                                                    numIsolated += 1
+
+
+
+            # print("\t"+str(numIsolated)+" entered isolation from testing")
+            timeOfLastInterventionCheck = model.t
+
+            #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    total_r = max(model.total_num_recovered())
+    print("Finished @ t = %.2f (%d (%.2f%%) infected)" % (model.t, currentNumInfected, currentPctInfected*100))
+    print(f"Total Recovered: {total_r}")
+    return total_tests, total_intros, numIsolated_positiveGroupmate, numIsolated

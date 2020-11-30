@@ -2664,8 +2664,8 @@ class ExtSEIRSNetworkModel():
                 # If the time to next event exceeds the max allowed interval,
                 # advance the system time by the max allowed interval,
                 # but do not execute any events (recalculate Gillespie interval/event next iteration)
-                print("WHOA NELLIE")
-                print(tau)
+                # print("WHOA NELLIE")
+                # print(tau)
                 self.t += max_dt
                 self.timer_state += max_dt
                 return True
@@ -2714,7 +2714,7 @@ class ExtSEIRSNetworkModel():
 
         else:
 
-            tau = 0.01
+            tau = 0.10
             self.t += tau
             self.timer_state += tau
 

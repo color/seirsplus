@@ -1,0 +1,4 @@
+job_spec:
+    name: seir-k5-webapp-models
+    pipeline_tag: jrh-k5-webapp
+    script_path: /color/seirsplus/seirsplus/k5_school/k5_school_webapp_runs.py

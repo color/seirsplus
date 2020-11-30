@@ -6,11 +6,38 @@ import sys
 import networkx
 import numpy as np
 import pandas as pd
+from collections import defaultdict
 
-from extended_models import *
-from networks import *
-from sim_loops import *
-from helper_functions import *
+def get_group_initE(model, groups):
+    assert model.t == 0.0
+    init_exposed_index = np.where(model.X == model.E)[0][0]
+    return(groups[init_exposed_index])# Ensure its the front of the model
+
+def get_group_final_infections(model, groups):
+    """
+    Given groups on a model (such as student/teacher) gets the group
+    totals for infections
+
+    Model is the ExtSEIRS Object, groups is a list of categories
+    """
+    group_infections = defaultdict(int)
+
+    for i,node_state in enumerate(model.X):
+        if node_state in (
+            model.E,
+            model.I_pre,
+            model.I_sym,
+            model.I_asym,
+            model.R,
+            model.Q_E,
+            model.Q_pre,
+            model.Q_sym,
+            model.Q_asym,
+            model.Q_R,
+        ):
+            group_infections[groups[i]] += 1
+    return(group_infections)
+
 
 def get_regular_series_output(model, tmax):
     """

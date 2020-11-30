@@ -2,21 +2,17 @@ from __future__ import division
 import numpy
 import scipy
 import networkx
-import FARZ as FARZ
-from extended_models import *
-
+import FARZ
+# from .models import *
 
 import matplotlib.pyplot as pyplot
-# import seaborn
 
-# seaborn.set_style('ticks')
-# seaborn.despine()
 
 
 
 def generate_workplace_contact_network(num_cohorts=1, num_nodes_per_cohort=100, num_teams_per_cohort=10,
                                         mean_intracohort_degree=6, pct_contacts_intercohort=0.2,
-                                        farz_params={'alpha':5.0, 'gamma':5.0, 'beta':0.5, 'r':1, 'q':0.0, 'phi':1,
+                                        farz_params={'alpha':5.0, 'gamma':5.0, 'beta':0.5, 'r':1, 'q':0.0, 'phi':10,
                                                      'b':0, 'epsilon':1e-6, 'directed': False, 'weighted': False},
                                         distancing_scales=[]):
 
@@ -65,18 +61,20 @@ def generate_workplace_contact_network(num_cohorts=1, num_nodes_per_cohort=100, 
 
         cohortStartIdx = cohortFinalIdx + 1
         cohortFinalIdx = cohortStartIdx + cohortNetwork.number_of_nodes() - 1
-        cohorts_indices['c'+str(c)] = range(cohortStartIdx, cohortFinalIdx)
+        cohorts_indices['c'+str(c)] = list(range(cohortStartIdx, cohortFinalIdx))
 
         for team, indices in teams_indices.items():
             if('c'+str(c) in team):
                 teams_indices[team] = [idx+cohortStartIdx for idx in indices]
 
-        for i in range(cohortNetwork.number_of_nodes()):
+        for i in list(range(cohortNetwork.number_of_nodes())):
             i_intraCohortDegree = cohortNetwork.degree[i]
             i_interCohortDegree = int( ((1/(1-pct_contacts_intercohort))*i_intraCohortDegree)-i_intraCohortDegree )
-            for d in range(i_interCohortDegree):
-                j = numpy.random.choice(list(range(0, cohortStartIdx))+list(range(cohortFinalIdx+1, N)))
-                workplaceNetwork.add_edge(i, j)
+            # Add intercohort edges:
+            if(len(cohortNetworks) > 1):
+                for d in list(range(i_interCohortDegree)):
+                    j = numpy.random.choice(list(range(0, cohortStartIdx))+list(range(cohortFinalIdx+1, N)))
+                    workplaceNetwork.add_edge(i, j)
 
     return workplaceNetwork, cohorts_indices, teams_indices
 
@@ -85,7 +83,7 @@ def generate_workplace_contact_network(num_cohorts=1, num_nodes_per_cohort=100, 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
-def generate_demographic_contact_network(N, demographic_data, layer_generator='LFR', layer_info=None, distancing_scales=[], isolation_groups=[]):
+def generate_demographic_contact_network(N, demographic_data, layer_generator='FARZ', layer_info=None, distancing_scales=[], isolation_groups=[], verbose=False):
 
     graphs = {}
 
@@ -97,7 +95,7 @@ def generate_demographic_contact_network(N, demographic_data, layer_generator='L
     # Preprocess Demographic Statistics:
     #########################################
     meanHouseholdSize = numpy.average(list(household_size_distn.keys()), weights=list(household_size_distn.values()))
-    print("mean household size: " + str(meanHouseholdSize))
+    # print("mean household size: " + str(meanHouseholdSize))
 
     # Calculate the distribution of household sizes given that the household has more than 1 member:
     household_size_distn_givenGT1 = {key: value/(1-household_size_distn[1]) for key, value in household_size_distn.items()}
@@ -286,8 +284,6 @@ def generate_demographic_contact_network(N, demographic_data, layer_generator='L
 
             homelessNodes -= household['size']
 
-            # household['indices'] = range(curMemberIndex, curMemberIndex+household['size'])
-
             households.append(household)
 
         else:
@@ -295,7 +291,7 @@ def generate_demographic_contact_network(N, demographic_data, layer_generator='L
 
 
     numHouseholds = len(households)
-    print("Num households: " +str(numHouseholds))
+
 
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -305,36 +301,41 @@ def generate_demographic_contact_network(N, demographic_data, layer_generator='L
     for ageBracket in sorted(age_distn):
         age_freq = numpy.sum([len([age for age in household['ageBrackets'] if age==ageBracket]) for household in households])/N
         print(str(ageBracket)+": %.4f\t(%.4f from target)" % (age_freq, (age_freq - age_distn[ageBracket])) )
+    print()
 
     print("Generated household size distribution:")
     for size in sorted(household_size_distn):
         size_freq = numpy.sum([1 for household in households if household['size']==size])/numHouseholds
         print(str(size)+": %.4f\t(%.4f from target)" % (size_freq, (size_freq - household_size_distn[size])) )
+    print("Num households: " +str(numHouseholds))
+    print("mean household size: " + str(meanHouseholdSize))
+    print()
 
-    print("Generated percent households with at least one member Under 20:")
-    checkval = len([household for household in households if not set(household['ageBrackets']).isdisjoint(ageBrackets_U20)])/numHouseholds
-    target   = pctHouseholdsWithMember_U20
-    print("%.4f\t\t(%.4f from target)" % (checkval, checkval - target))
+    if(verbose):
+        print("Generated percent households with at least one member Under 20:")
+        checkval = len([household for household in households if not set(household['ageBrackets']).isdisjoint(ageBrackets_U20)])/numHouseholds
+        target   = pctHouseholdsWithMember_U20
+        print("%.4f\t\t(%.4f from target)" % (checkval, checkval - target))
 
-    print("Generated percent households with at least one Over 60")
-    checkval = len([household for household in households if not set(household['ageBrackets']).isdisjoint(ageBrackets_O60)])/numHouseholds
-    target   = pctHouseholdsWithMember_O60
-    print("%.4f\t\t(%.4f from target)" % (checkval, checkval - target))
+        print("Generated percent households with at least one Over 60")
+        checkval = len([household for household in households if not set(household['ageBrackets']).isdisjoint(ageBrackets_O60)])/numHouseholds
+        target   = pctHouseholdsWithMember_O60
+        print("%.4f\t\t(%.4f from target)" % (checkval, checkval - target))
 
-    print("Generated percent households with at least one Under 20 AND Over 60")
-    checkval = len([household for household in households if not set(household['ageBrackets']).isdisjoint(ageBrackets_O60) and not set(household['ageBrackets']).isdisjoint(ageBrackets_U20)])/numHouseholds
-    target   = pctHouseholdsWithMember_U20andO60
-    print("%.4f\t\t(%.4f from target)" % (checkval, checkval - target))
+        print("Generated percent households with at least one Under 20 AND Over 60")
+        checkval = len([household for household in households if not set(household['ageBrackets']).isdisjoint(ageBrackets_O60) and not set(household['ageBrackets']).isdisjoint(ageBrackets_U20)])/numHouseholds
+        target   = pctHouseholdsWithMember_U20andO60
+        print("%.4f\t\t(%.4f from target)" % (checkval, checkval - target))
 
-    print("Generated percent households with 1 total member who is Over 60")
-    checkval = numpy.sum([1 for household in households if household['size']==1 and not set(household['ageBrackets']).isdisjoint(ageBrackets_O60)])/numHouseholds
-    target   = pctHouseholdsWithMember_O60_givenEq1*prob_eq1
-    print("%.4f\t\t(%.4f from target)" % (checkval, checkval - target))
+        print("Generated percent households with 1 total member who is Over 60")
+        checkval = numpy.sum([1 for household in households if household['size']==1 and not set(household['ageBrackets']).isdisjoint(ageBrackets_O60)])/numHouseholds
+        target   = pctHouseholdsWithMember_O60_givenEq1*prob_eq1
+        print("%.4f\t\t(%.4f from target)" % (checkval, checkval - target))
 
-    print("Generated mean num members Under 20 given at least one member is Under 20")
-    checkval = numpy.mean([numpy.in1d(household['ageBrackets'], ageBrackets_U20).sum() for household in households if not set(household['ageBrackets']).isdisjoint(ageBrackets_U20)])
-    target   = meanNumU20PerHousehold_givenU20
-    print("%.4f\t\t(%.4f from target)" % (checkval, checkval - target))
+        print("Generated mean num members Under 20 given at least one member is Under 20")
+        checkval = numpy.mean([numpy.in1d(household['ageBrackets'], ageBrackets_U20).sum() for household in households if not set(household['ageBrackets']).isdisjoint(ageBrackets_U20)])
+        target   = meanNumU20PerHousehold_givenU20
+        print("%.4f\t\t(%.4f from target)" % (checkval, checkval - target))
 
     #
 
@@ -402,17 +403,13 @@ def generate_demographic_contact_network(N, demographic_data, layer_generator='L
 
                     # print "TARGET MEAN DEGREE     = " + str(targetMeanDegree)
 
-                    layerInfo['graph'] = networkx.algorithms.community.LFR_benchmark_graph(
+                    layerInfo['graph'] = networkx.generators.community.LFR_benchmark_graph(
                                             n=layerInfo['numIndividuals'],
                                             tau1=3, tau2=2, mu=0.5,
                                             average_degree=int(targetMeanDegree),
                                             tol=1e-01, max_iters=200, seed=(None if graph_gen_attempts<10 else int(numpy.random.rand()*1000)))
 
                 elif(layer_generator == 'FARZ'):
-
-                    # print
-                    # print "TARGET MEAN DEGREE     = " + str(targetMeanDegree)
-                    # print "TARGET MEAN DEGREE / 2 = " + str(int(targetMeanDegree/2))
 
                     # https://github.com/rabbanyk/FARZ
                     layerInfo['graph'], layerInfo['communities'] = FARZ.generate(farz_params={
@@ -441,8 +438,9 @@ def generate_demographic_contact_network(N, demographic_data, layer_generator='L
                 if(meanDegree+meanHouseholdSize >= targetMeanDegreeRange[0] and meanDegree+meanHouseholdSize <= targetMeanDegreeRange[1]):
                 # if(meanDegree+meanHouseholdSize >= targetMeanDegree+meanHouseholdSize-1 and meanDegree+meanHouseholdSize <= targetMeanDegree+meanHouseholdSize+1):
 
-                    print(layerGroup+" public mean degree = "+str((meanDegree)))
-                    print(layerGroup+" public max degree  = "+str((maxDegree)))
+                    if(verbose):
+                        print(layerGroup+" public mean degree = "+str((meanDegree)))
+                        print(layerGroup+" public max degree  = "+str((maxDegree)))
 
                     adjMatrices.append(networkx.adj_matrix(layerInfo['graph']))
 
@@ -468,8 +466,9 @@ def generate_demographic_contact_network(N, demographic_data, layer_generator='L
                         elif(meanDegree+meanHouseholdSize > targetMeanDegreeRange[1]):
                             targetMeanDegree -= 1 if layer_generator=='FARZ' else 0.05
                         # reload(networkx)
-                    # print("Try again... (mean degree = "+str(meanDegree)+"+"+str(meanHouseholdSize)+" is outside the target range for mean degree "+str(targetMeanDegreeRange)+")")
-                    print("\tTry again... (mean degree = %.2f+%.2f=%.2f is outside the target range for mean degree (%.2f, %.2f)" % (meanDegree, meanHouseholdSize, meanDegree+meanHouseholdSize, targetMeanDegreeRange[0], targetMeanDegreeRange[1]))
+                    if(verbose):
+                        # print("Try again... (mean degree = "+str(meanDegree)+"+"+str(meanHouseholdSize)+" is outside the target range for mean degree "+str(targetMeanDegreeRange)+")")
+                        print("\tTry again... (mean degree = %.2f+%.2f=%.2f is outside the target range for mean degree (%.2f, %.2f)" % (meanDegree, meanHouseholdSize, meanDegree+meanHouseholdSize, targetMeanDegreeRange[0], targetMeanDegreeRange[1]))
 
             # The networks LFR graph generator function has unreliable convergence.
             # If it fails to converge in allotted iterations, try again to generate.
@@ -478,7 +477,8 @@ def generate_demographic_contact_network(N, demographic_data, layer_generator='L
                 graph_gen_attempts += 1
                 # if(graph_gen_attempts >= 10 and graph_gen_attempts % 10):
                 #     reload(networkx)
-                print("\tTry again... (networkx failed to converge on a graph)")
+                if(verbose):
+                    print("\tTry again... (networkx failed to converge on a graph)")
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Assemble an graph for the full population out of the adjacencies generated for each layer:
@@ -487,33 +487,6 @@ def generate_demographic_contact_network(N, demographic_data, layer_generator='L
     # Create a networkx Graph object from the adjacency matrix:
     G_baseline = networkx.from_scipy_sparse_matrix(A_baseline)
     graphs['baseline'] = G_baseline
-
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # Check the connectivity of the baseline public contacts graph that of each age group's graph layer:
-    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # nodeDegrees_baseline_public    = [d[1] for d in G_baseline.degree()]
-    # meanDegree_baseline_public= numpy.mean(nodeDegrees_baseline_public)
-    # maxDegree_baseline_public= numpy.max(nodeDegrees_baseline_public)
-    # components = sorted(networkx.connected_components(G_baseline), key=len, reverse=True)
-    # numConnectedComps = len(components)
-    # largestConnectedComp = G_baseline.subgraph(components[0])
-    # print("G_baseline mean degree = "+str((meanDegree_baseline_public)))
-    # print("G_baseline max degree = "+str((maxDegree_baseline_public)))
-    # print("G_baseline number of connected components = {0:d}".format(numConnectedComps))
-    # print("G_baseline largest connected component = {0:d}".format(len(largestConnectedComp)))
-    # for layerGroup, layerInfo in layer_info.items():
-    #     nodeDegrees_group = A_baseline[min(layerInfo['indices']):max(layerInfo['indices']), :].sum(axis=1)
-    #     print(layerGroup+" public graph mean degree = "+str(numpy.mean(nodeDegrees_group)))
-    #     print(layerGroup+" public graph max degree  = "+str(numpy.max(nodeDegrees_group)))
-    #     pyplot.hist(nodeDegrees_group, bins=range(int(max(nodeDegrees_group))), alpha=0.5, label=layerGroup)
-    # # pyplot.hist(nodeDegrees_baseline_public, bins=range(int(max(nodeDegrees_baseline_public))), alpha=0.5, color='tab:red', label='Full Pop')
-    # pyplot.xlim(0,40)
-    # pyplot.xlabel('degree')
-    # pyplot.ylabel('num nodes')
-    # pyplot.legend(loc='upper right')
-    # pyplot.show()
-
-
 
 
     #########################################
@@ -531,40 +504,18 @@ def generate_demographic_contact_network(N, demographic_data, layer_generator='L
     for dist_scale in distancing_scales:
         graphs['distancingScale'+str(dist_scale)] = custom_exponential_graph(G_baseline_NODIST, scale=dist_scale)
 
-        # Check the connectivity of the social distancing public contact graphs (which include connections for all age groups):
-        # nodeDegrees_baseline_public_NODIST    = [d[1] for d in G_baseline_NODIST.degree()]
-        # meanDegree_baseline_public_NODIST= numpy.mean(nodeDegrees_baseline_public_NODIST)
-        # maxDegree_baseline_public_NODIST= numpy.max(nodeDegrees_baseline_public_NODIST)
-        # components = sorted(networkx.connected_components(G_baseline_NODIST), key=len, reverse=True)
-        # numConnectedComps = len(components)
-        # largestConnectedComp = G_baseline_NODIST.subgraph(components[0])
-        # print("G_baseline_NODIST mean degree = "+str((meanDegree_baseline_public_NODIST)))
-        # print("G_baseline_NODIST max degree = "+str((maxDegree_baseline_public_NODIST)))
-        # print("G_baseline_NODIST number of connected components = {0:d}".format(numConnectedComps))
-        # print("G_baseline_NODIST largest connected component = {0:d}".format(len(largestConnectedComp)))
-
-        nodeDegrees_baseline_public_DIST    = [d[1] for d in graphs['distancingScale'+str(dist_scale)].degree()]
-        print("Distancing Public Degree Pcts:")
-        (unique, counts) = numpy.unique(nodeDegrees_baseline_public_DIST, return_counts=True)
-        print([str(unique)+": "+str(count/N) for (unique, count) in zip(unique, counts)])
-        # meanDegree_baseline_public_DIST= numpy.mean(nodeDegrees_baseline_public_DIST)
-        # maxDegree_baseline_public_DIST= numpy.max(nodeDegrees_baseline_public_DIST)
-        # components = sorted(networkx.connected_components(graphs['distancingScale'+str(dist_scale)]), key=len, reverse=True)
-        # numConnectedComps = len(components)
-        # largestConnectedComp = graphs['distancingScale'+str(dist_scale)].subgraph(components[0])
-        # print("G_distancing scale"+str(dist_scale)+" mean degree = "+str((meanDegree_baseline_public_DIST)))
-        # print("G_distancing scale"+str(dist_scale)+" max degree = "+str((maxDegree_baseline_public_DIST)))
-        # print("G_distancing scale"+str(dist_scale)+" number of connected components = {0:d}".format(numConnectedComps))
-        # print("G_distancing scale"+str(dist_scale)+" largest connected component = {0:d}".format(len(largestConnectedComp)))
-
-        # pyplot.hist(nodeDegrees_baseline_public_NODIST, bins=range(int(max(nodeDegrees_baseline_public_NODIST))), alpha=0.5, color='tab:blue', label='Public Contacts (no dist)')
-        pyplot.hist(nodeDegrees_baseline_public_DIST, bins=range(int(max(nodeDegrees_baseline_public_DIST))), alpha=0.5, color='tab:purple', label='Public Contacts (distancingScale'+str(dist_scale)+')')
-
-        pyplot.xlim(0,40)
-        pyplot.xlabel('degree')
-        pyplot.ylabel('num nodes')
-        pyplot.legend(loc='upper right')
-        pyplot.show()
+        if(verbose):
+            nodeDegrees_baseline_public_DIST    = [d[1] for d in graphs['distancingScale'+str(dist_scale)].degree()]
+            print("Distancing Public Degree Pcts:")
+            (unique, counts) = numpy.unique(nodeDegrees_baseline_public_DIST, return_counts=True)
+            print([str(unique)+": "+str(count/N) for (unique, count) in zip(unique, counts)])
+            # pyplot.hist(nodeDegrees_baseline_public_NODIST, bins=range(int(max(nodeDegrees_baseline_public_NODIST))), alpha=0.5, color='tab:blue', label='Public Contacts (no dist)')
+            pyplot.hist(nodeDegrees_baseline_public_DIST, bins=range(int(max(nodeDegrees_baseline_public_DIST))), alpha=0.5, color='tab:purple', label='Public Contacts (distancingScale'+str(dist_scale)+')')
+            pyplot.xlim(0,40)
+            pyplot.xlabel('degree')
+            pyplot.ylabel('num nodes')
+            pyplot.legend(loc='upper right')
+            pyplot.show()
 
 
     #########################################
@@ -625,144 +576,52 @@ def generate_demographic_contact_network(N, demographic_data, layer_generator='L
     #########################################
     # Check the connectivity of the fully constructed contacts graphs for each age group's layer:
     #########################################
-    for graphName, graph in graphs.items():
-        nodeDegrees    = [d[1] for d in graph.degree()]
-        meanDegree= numpy.mean(nodeDegrees)
-        maxDegree= numpy.max(nodeDegrees)
-        components = sorted(networkx.connected_components(graph), key=len, reverse=True)
-        numConnectedComps = len(components)
-        largestConnectedComp = graph.subgraph(components[0])
-        print(graphName+": Overall mean degree = "+str((meanDegree)))
-        print(graphName+": Overall max degree = "+str((maxDegree)))
-        print(graphName+": number of connected components = {0:d}".format(numConnectedComps))
-        print(graphName+": largest connected component = {0:d}".format(len(largestConnectedComp)))
-        for layerGroup, layerInfo in layer_info.items():
-            nodeDegrees_group = networkx.adj_matrix(graph)[min(layerInfo['indices']):max(layerInfo['indices']), :].sum(axis=1)
-            print("\t"+graphName+": "+layerGroup+" final graph mean degree = "+str(numpy.mean(nodeDegrees_group)))
-            print("\t"+graphName+": "+layerGroup+" final graph max degree  = "+str(numpy.max(nodeDegrees_group)))
-            pyplot.hist(nodeDegrees_group, bins=range(int(max(nodeDegrees_group))), alpha=0.5, label=layerGroup)
-        # pyplot.hist(nodeDegrees, bins=range(int(max(nodeDegrees))), alpha=0.5, color='black', label=graphName)
-        pyplot.xlim(0,40)
-        pyplot.xlabel('degree')
-        pyplot.ylabel('num nodes')
-        pyplot.legend(loc='upper right')
-        pyplot.show()
+    if(verbose):
+        for graphName, graph in graphs.items():
+            nodeDegrees    = [d[1] for d in graph.degree()]
+            meanDegree= numpy.mean(nodeDegrees)
+            maxDegree= numpy.max(nodeDegrees)
+            components = sorted(networkx.connected_components(graph), key=len, reverse=True)
+            numConnectedComps = len(components)
+            largestConnectedComp = graph.subgraph(components[0])
+            print(graphName+": Overall mean degree = "+str((meanDegree)))
+            print(graphName+": Overall max degree = "+str((maxDegree)))
+            print(graphName+": number of connected components = {0:d}".format(numConnectedComps))
+            print(graphName+": largest connected component = {0:d}".format(len(largestConnectedComp)))
+            for layerGroup, layerInfo in layer_info.items():
+                nodeDegrees_group = networkx.adj_matrix(graph)[min(layerInfo['indices']):max(layerInfo['indices']), :].sum(axis=1)
+                print("\t"+graphName+": "+layerGroup+" final graph mean degree = "+str(numpy.mean(nodeDegrees_group)))
+                print("\t"+graphName+": "+layerGroup+" final graph max degree  = "+str(numpy.max(nodeDegrees_group)))
+                pyplot.hist(nodeDegrees_group, bins=range(int(max(nodeDegrees_group))), alpha=0.5, label=layerGroup)
+            # pyplot.hist(nodeDegrees, bins=range(int(max(nodeDegrees))), alpha=0.5, color='black', label=graphName)
+            pyplot.xlim(0,40)
+            pyplot.xlabel('degree')
+            pyplot.ylabel('num nodes')
+            pyplot.legend(loc='upper right')
+            pyplot.show()
 
     #########################################
 
     return graphs, individualAgeBracketLabels, households
 
 
-
-
-
-
-
-def household_country_data(country):
-
-    if(country=='US'):
-        household_data = {
-                            'household_size_distn':{ 1: 0.283708848,
-                                                    2: 0.345103011,
-                                                    3: 0.150677793,
-                                                    4: 0.127649150,
-                                                    5: 0.057777709,
-                                                    6: 0.022624223,
-                                                    7: 0.012459266  },
-
-                            'age_distn':{'0-9':   0.121,
-                                                '10-19': 0.131,
-                                                '20-29': 0.137,
-                                                '30-39': 0.133,
-                                                '40-49': 0.124,
-                                                '50-59': 0.131,
-                                                '60-69': 0.115,
-                                                '70-79': 0.070,
-                                                '80+'  : 0.038  },
-
-                            'household_stats':{ 'pct_with_under20':          0.3368,
-                                                'pct_with_over60':           0.3801,
-                                                'pct_with_under20_over60':  0.0341,
-                                                'pct_with_over60_givenSingleOccupant':       0.110,
-                                                'mean_num_under20_givenAtLeastOneUnder20':  1.91 }
-                        }
-
-    return household_data
-
-
-
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-
-
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# Define a custom method for generating
-# power-law-like graphs with exponential tails
-# both above and below the degree mean and
-# where the mean degree be easily down-shifted
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def custom_exponential_graph(base_graph=None, scale=100, min_num_edges=0, m=9, n=None):
-    # Generate a random preferential attachment power law graph as a starting point.
-    # By the way this graph is constructed, it is expected to have 1 connected component.
-    # Every node is added along with m=8 edges, so the min degree is m=8.
-    if(base_graph):
-        graph = base_graph.copy()
-    else:
-        assert(n is not None), "Argument n (number of nodes) must be provided when no base graph is given."
-        graph = networkx.barabasi_albert_graph(n=n, m=m)
-
-    # To get a graph with power-law-esque properties but without the fixed minimum degree,
-    # We modify the graph by probabilistically dropping some edges from each node.
-    for node in graph:
-        neighbors = list(graph[node].keys())
-        if(len(neighbors) > 0):
-            quarantineEdgeNum = int( max(min(numpy.random.exponential(scale=scale, size=1), len(neighbors)), min_num_edges) )
-            quarantineKeepNeighbors = numpy.random.choice(neighbors, size=quarantineEdgeNum, replace=False)
-            for neighbor in neighbors:
-                if(neighbor not in quarantineKeepNeighbors):
-                    graph.remove_edge(node, neighbor)
-
-    return graph
-
 #^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 #^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-def plot_degree_distn(graph, max_degree=None, show=True, use_seaborn=True):
-    import matplotlib.pyplot as pyplot
-    if(use_seaborn):
-        import seaborn
-        seaborn.set_style('ticks')
-        seaborn.despine()
-    # Get a list of the node degrees:
-    if type(graph)==numpy.ndarray:
-        nodeDegrees = graph.sum(axis=0).reshape((graph.shape[0],1))   # sums of adj matrix cols
-    elif type(graph)==networkx.classes.graph.Graph:
-        nodeDegrees = [d[1] for d in graph.degree()]
-    else:
-        raise BaseException("Input an adjacency matrix or networkx object only.")
-    # Calculate the mean degree:
-    meanDegree = numpy.mean(nodeDegrees)
-    # Generate a histogram of the node degrees:
-    pyplot.hist(nodeDegrees, bins=range(max(nodeDegrees)), alpha=0.75, color='tab:blue', label=('mean degree = %.1f' % meanDegree))
-    pyplot.xlim(0, max(nodeDegrees) if not max_degree else max_degree)
-    pyplot.xlabel('degree')
-    pyplot.ylabel('num nodes')
-    pyplot.legend(loc='upper right')
-    if(show):
-        pyplot.show()
 
 def generate_K5_school_contact_network(num_grades, num_classrooms_per_grade, class_sizes,
-                                        student_household_connections=True,
+                                        num_student_blocks=1, block_by_household=True, connect_students_in_households=True,
                                         num_staff=0, num_teacher_staff_communities=1, teacher_staff_degree=10,
                                         farz_params={'alpha':5.0, 'gamma':5.0, 'beta':0.5, 'r':1, 'q':0.0, 'phi':10,
                                                      'b':0, 'epsilon':1e-6, 'directed': False, 'weighted': False},):
 
-    grades_studentIDs     = {}
-    classrooms_studentIDs = {}
-    classrooms_teacherIDs = {}
-    node_labels           = []
+    networks                 = {}
+
+    grades_studentIDs        = {}
+    classrooms_studentIDs    = {}
+    classrooms_teacherIDs    = {}
+    node_labels              = []
+
+    studentIDs_studentBlocks = {}
 
     ######################################
     # Generate the student network layer #
@@ -807,13 +666,15 @@ def generate_K5_school_contact_network(num_grades, num_classrooms_per_grade, cla
 
     studentNetwork = scipy.sparse.block_diag(gradeSubnetworks)
 
+    totalNumStudents   = curStudentID
+    totalNumClassrooms = curClassID
+
+    studentIDs_studentBlocks = {i: (i%num_student_blocks)+1 for i in list(range(totalNumStudents))}
+
 
     ############################################
     # Generate the teacher/staff network layer #
     ############################################
-
-    totalNumStudents   = curStudentID
-    totalNumClassrooms = curClassID
 
     numTeachers = totalNumClassrooms
     numStaff    = num_staff
@@ -843,7 +704,6 @@ def generate_K5_school_contact_network(num_grades, num_classrooms_per_grade, cla
     for classroomID, studentIDs in classrooms_studentIDs.items():
         for studentID in studentIDs:
             schoolNetwork.add_edge(curTeacherID, studentID)
-            print("add_edge("+str(curTeacherID)+", "+str(studentID)+")")
             classrooms_teacherIDs[classroomID] = curTeacherID
         curTeacherID += 1
 
@@ -852,10 +712,11 @@ def generate_K5_school_contact_network(num_grades, num_classrooms_per_grade, cla
     networkx.set_edge_attributes(schoolNetwork, 1, 'layout_weight')
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    ##############################################
-    # Connect students within the same household #
-    ##############################################
-    if(student_household_connections):
+
+    ######################################################
+    # Determine which students occupy the same household #
+    ######################################################
+    if(connect_students_in_households):
 
         # Using 2016 (latest) census data: https://www2.census.gov/programs-surveys/demo/tables/families/2016/cps-2016/tabf1-all.xls
         # Of US households with at least 1 child age 6-11 (K-5 age)...
@@ -868,11 +729,18 @@ def generate_K5_school_contact_network(num_grades, num_classrooms_per_grade, cla
         studentsNeedingHousehold = list(range(totalNumStudents))
         numpy.random.shuffle(studentsNeedingHousehold)
 
+        householdEdges = []
+
+        counter=0
         while(len(studentsNeedingHousehold) > 0):
 
             focalStudentID = studentsNeedingHousehold.pop()
 
             numK5Housemates = min( numpy.random.choice([0, 1, 2], p=[0.69, 0.26, 0.05]), len(studentsNeedingHousehold) )
+
+            # if(numK5Housemates>0):
+            #     counter += 1
+            #     print(str(focalStudentID) + str(": ") + str(numK5Housemates) + " ("+str(counter)+")")
 
             # Draw another student from the school, ensuring housemates (siblings) aren't in same grade:
             k5Housemates = []
@@ -883,14 +751,165 @@ def generate_K5_school_contact_network(num_grades, num_classrooms_per_grade, cla
                 otherStudentGrade = [key for key, value in grades_studentIDs.items() if otherStudentID in value][0]
                 if(focalStudentGrade != otherStudentGrade):
                     # Create an edge between focal student and their K-5 housemates:
-                    schoolNetwork.add_edge(focalStudentID, otherStudentID, layout_weight=0)
+                    householdEdges.append((focalStudentID, otherStudentID))
                     k5Housemates.append(otherStudentID)
+                    # Force all housemates to be in the same school block:
+                    if(block_by_household):
+                        studentIDs_studentBlocks[otherStudentID] = studentIDs_studentBlocks[focalStudentID]
                 else:
                     # Put this otherStudent back in the studentsNeedingHousehold list:
                     studentsNeedingHousehold.append(otherStudentID)
                 attempts += 1
             # If 3 students in household, connect the 2nd and 3rd drawn housemates
             if(len(k5Housemates) == 2):
-                schoolNetwork.add_edge(k5Housemates[0], k5Housemates[-1], layout_weight=0)
+                householdEdges.append((k5Housemates[0], k5Housemates[-1]))
 
-    return schoolNetwork, grades_studentIDs, classrooms_studentIDs, classrooms_teacherIDs, node_labels
+
+    ################################################################################
+    # Create versions of the network representing different subgroups being onsite #
+    ################################################################################
+
+    networks['onsite-all']  = schoolNetwork
+    networks['offsite-all'] = networkx.classes.function.create_empty_copy(schoolNetwork)
+
+    if(num_student_blocks > 1):
+        for block in range(1, num_student_blocks+1):
+            # Create a copy of the full network to be modified
+            networks['onsite-block'+str(block)] = schoolNetwork.copy()
+            # Iterate over students, removing out-of-block students from this network:
+            for studentID, studentBlock in studentIDs_studentBlocks.items():
+                if(studentBlock == block):
+                    # Do nothing, keep this student in the onsite network for this block
+                    pass
+                else:
+                    # Remove edges for student's not in the current block
+                    studentEdges = list( networks['onsite-block'+str(block)].edges(studentID) )
+                    networks['onsite-block'+str(block)].remove_edges_from(studentEdges)
+
+
+    #######################################
+    # Add household edges to all networks #
+    #######################################
+    for networkName, network in networks.items():
+        network.add_edges_from(householdEdges, layout_weight=0.01)
+
+
+    return networks, grades_studentIDs, classrooms_studentIDs, classrooms_teacherIDs, studentIDs_studentBlocks, node_labels
+
+
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+def household_country_data(country):
+
+    if(country=='US'):
+        household_data = {
+                            'household_size_distn':{ 1: 0.283708848,
+                                                    2: 0.345103011,
+                                                    3: 0.150677793,
+                                                    4: 0.127649150,
+                                                    5: 0.057777709,
+                                                    6: 0.022624223,
+                                                    7: 0.012459266  },
+
+                            'age_distn':{'0-9':   0.121,
+                                                '10-19': 0.131,
+                                                '20-29': 0.137,
+                                                '30-39': 0.133,
+                                                '40-49': 0.124,
+                                                '50-59': 0.131,
+                                                '60-69': 0.115,
+                                                '70-79': 0.070,
+                                                '80+'  : 0.038  },
+
+                            'household_stats':{ 'pct_with_under20':          0.3368,
+                                                'pct_with_over60':           0.3801,
+                                                'pct_with_under20_over60':  0.0341,
+                                                'pct_with_over60_givenSingleOccupant':       0.110,
+                                                'mean_num_under20_givenAtLeastOneUnder20':  1.91 }
+                        }
+
+    return household_data
+
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Defines a random exponential edge pruning mechanism
+# where the mean degree be easily down-shifted
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+def custom_exponential_graph(base_graph=None, scale=100, min_num_edges=0, m=9, n=None):
+    # If no base graph is provided, generate a random preferential attachment power law graph as a starting point.
+    if(base_graph):
+        graph = base_graph.copy()
+    else:
+        assert(n is not None), "Argument n (number of nodes) must be provided when no base graph is given."
+        graph = networkx.barabasi_albert_graph(n=n, m=m)
+
+    # We modify the graph by probabilistically dropping some edges from each node.
+    for node in graph:
+        neighbors = list(graph[node].keys())
+        if(len(neighbors) > 0):
+            quarantineEdgeNum = int( max(min(numpy.random.exponential(scale=scale, size=1), len(neighbors)), min_num_edges) )
+            quarantineKeepNeighbors = numpy.random.choice(neighbors, size=quarantineEdgeNum, replace=False)
+            for neighbor in neighbors:
+                if(neighbor not in quarantineKeepNeighbors):
+                    graph.remove_edge(node, neighbor)
+
+    return graph
+
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+def plot_degree_distn(graph, max_degree=None, show=True, use_seaborn=True):
+    import matplotlib.pyplot as pyplot
+    if(use_seaborn):
+        import seaborn
+        seaborn.set_style('ticks')
+        seaborn.despine()
+    # Get a list of the node degrees:
+    if type(graph)==numpy.ndarray:
+        nodeDegrees = graph.sum(axis=0).reshape((graph.shape[0],1))   # sums of adj matrix cols
+    elif type(graph)==networkx.classes.graph.Graph:
+        nodeDegrees = [d[1] for d in graph.degree()]
+    else:
+        raise BaseException("Input an adjacency matrix or networkx object only.")
+    # Calculate the mean degree:
+    meanDegree = numpy.mean(nodeDegrees)
+    # Generate a histogram of the node degrees:
+    pyplot.hist(nodeDegrees, bins=range(max(nodeDegrees)), alpha=0.75, color='tab:blue', label=('mean degree = %.1f' % meanDegree))
+    pyplot.xlim(0, max(nodeDegrees) if not max_degree else max_degree)
+    pyplot.xlabel('degree')
+    pyplot.ylabel('num nodes')
+    pyplot.legend(loc='upper right')
+    if(show):
+        pyplot.show()
+
+
+
+
+
+
+
+# G, b, c, d, e = generate_K5_school_contact_network(num_grades=6, num_classrooms_per_grade=4, class_sizes=20,
+#                                                 connect_students_in_households=True,
+#                                                 num_staff=24, num_teacher_staff_communities=3, teacher_staff_degree=5)
+# print(G)
+# print()
+# print(b)
+# print()
+# print(c)
+# print()
+# print(d)
+# print()
+# print(e)
+# print()
+
+# node_colors = ['tab:green' if label=='teacher' else 'tab:orange' if label=='staff' else 'tab:blue' for label in e]
+# print(node_colors)
+
+# networkx.draw(G, pos=networkx.spring_layout(G, weight='layout_weight'), node_size=20, node_color=node_colors, edge_color='lightgray', alpha=0.5)
+# pyplot.show()
+
+# print(G.edges(data=True))

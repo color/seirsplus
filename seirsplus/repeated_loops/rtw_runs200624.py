@@ -3,7 +3,7 @@ import networkx
 import numpy as np
 import pandas as pd
 
-from extended_models import *
+from models import *
 from networks import *
 from sim_loops import *
 from helper_functions import *
@@ -37,6 +37,13 @@ def baseline_simulation(model, time):
     A simulation with no interventions at all, but some syptomatic self isolation
     """
     return run_rtw_testing_sim(model=model, T=time, symptomatic_selfiso_compliance_rate=0.3)
+
+def baseline_simulation_no_iso(model, time):
+    """
+    A simulation with no interventions at all, but some syptomatic self isolation
+    """
+    return run_rtw_testing_sim(model=model, T=time)
+
 
 def weekly_testing_simulation(model, time):
     """
@@ -173,6 +180,8 @@ def main():
     weekly_tests = repeat_runs(repeats, weekly_testing_simulation)
     semi_weekly_tests = repeat_runs(repeats, semiweekly_testing_simulation)
 
+
+
     baseline.to_csv('/Users/julianhomburger/Data/covid/seirsplus/200624/seir_baseline200629.csv', index=False)
     weekly_tests.to_csv('/Users/julianhomburger/Data/covid/seirsplus/200624/seir_weekly_tests200629.csv', index=False)
     semi_weekly_tests.to_csv('/Users/julianhomburger/Data/covid/seirsplus/200624/seir_semiweekly_tests200629.csv', index=False)
@@ -229,3 +238,5 @@ def main():
 
     weekly_high_init = repeat_runs(repeats, weekly_continuous_testing_simulation)
     weekly_high_init.to_csv('/Users/julianhomburger/Data/covid/seirsplus/weekly_high_init.csv')
+
+    baseline_no_iso= repeat_runs(repeats, baseline_simulation_no_iso)
